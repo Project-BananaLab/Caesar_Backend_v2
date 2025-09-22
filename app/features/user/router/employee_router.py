@@ -58,7 +58,31 @@ async def get_all_employees():
         """)
         
         employees = cursor.fetchall()
-        return employees
+        
+        # 암호화된 필드들을 복호화
+        decrypted_employees = []
+        for employee in employees:
+            employee_dict = dict(employee)
+            
+            # google_calendar_json 복호화
+            if employee_dict.get('google_calendar_json'):
+                employee_dict['google_calendar_json'] = decrypt_data(employee_dict['google_calendar_json'])
+            
+            # google_drive_json 복호화
+            if employee_dict.get('google_drive_json'):
+                employee_dict['google_drive_json'] = decrypt_data(employee_dict['google_drive_json'])
+            
+            # notion_api 복호화
+            if employee_dict.get('notion_api'):
+                employee_dict['notion_api'] = decrypt_data(employee_dict['notion_api'])
+            
+            # slack_api 복호화
+            if employee_dict.get('slack_api'):
+                employee_dict['slack_api'] = decrypt_data(employee_dict['slack_api'])
+            
+            decrypted_employees.append(employee_dict)
+        
+        return decrypted_employees
         
     except psycopg2.Error as e:
         raise HTTPException(
@@ -94,7 +118,26 @@ async def get_employee(employee_id: int):
                 detail=f"ID {employee_id}인 직원을 찾을 수 없습니다."
             )
         
-        return employee
+        # 암호화된 필드들을 복호화해서 반환
+        employee_dict = dict(employee)
+        
+        # google_calendar_json 복호화
+        if employee_dict.get('google_calendar_json'):
+            employee_dict['google_calendar_json'] = decrypt_data(employee_dict['google_calendar_json'])
+        
+        # google_drive_json 복호화
+        if employee_dict.get('google_drive_json'):
+            employee_dict['google_drive_json'] = decrypt_data(employee_dict['google_drive_json'])
+        
+        # notion_api 복호화
+        if employee_dict.get('notion_api'):
+            employee_dict['notion_api'] = decrypt_data(employee_dict['notion_api'])
+        
+        # slack_api 복호화
+        if employee_dict.get('slack_api'):
+            employee_dict['slack_api'] = decrypt_data(employee_dict['slack_api'])
+        
+        return employee_dict
         
     except psycopg2.Error as e:
         raise HTTPException(
@@ -142,7 +185,42 @@ async def create_employee(employee_data: EmployeeCreate):
         new_employee = cursor.fetchone()
         conn.commit()
         
-        return new_employee
+        # 암호화된 필드들을 복호화해서 반환
+        employee_dict = dict(new_employee)
+        
+        # google_calendar_json 복호화
+        if employee_dict.get('google_calendar_json'):
+            try:
+                employee_dict['google_calendar_json'] = decrypt_data(employee_dict['google_calendar_json'])
+            except Exception as e:
+                print(f"Error decrypting google_calendar_json: {e}, type: {type(employee_dict['google_calendar_json'])}")
+                raise HTTPException(status_code=500, detail=f"복호화 실패 (google_calendar_json): {str(e)}")
+        
+        # google_drive_json 복호화
+        if employee_dict.get('google_drive_json'):
+            try:
+                employee_dict['google_drive_json'] = decrypt_data(employee_dict['google_drive_json'])
+            except Exception as e:
+                print(f"Error decrypting google_drive_json: {e}, type: {type(employee_dict['google_drive_json'])}")
+                raise HTTPException(status_code=500, detail=f"복호화 실패 (google_drive_json): {str(e)}")
+        
+        # notion_api 복호화
+        if employee_dict.get('notion_api'):
+            try:
+                employee_dict['notion_api'] = decrypt_data(employee_dict['notion_api'])
+            except Exception as e:
+                print(f"Error decrypting notion_api: {e}, type: {type(employee_dict['notion_api'])}")
+                raise HTTPException(status_code=500, detail=f"복호화 실패 (notion_api): {str(e)}")
+        
+        # slack_api 복호화
+        if employee_dict.get('slack_api'):
+            try:
+                employee_dict['slack_api'] = decrypt_data(employee_dict['slack_api'])
+            except Exception as e:
+                print(f"Error decrypting slack_api: {e}, type: {type(employee_dict['slack_api'])}")
+                raise HTTPException(status_code=500, detail=f"복호화 실패 (slack_api): {str(e)}")
+        
+        return employee_dict
         
     except psycopg2.Error as e:
         conn.rollback()
@@ -203,7 +281,26 @@ async def update_employee(employee_id: int, employee_data: EmployeeCreate):
         updated_employee = cursor.fetchone()
         conn.commit()
         
-        return updated_employee
+        # 암호화된 필드들을 복호화해서 반환
+        employee_dict = dict(updated_employee)
+        
+        # google_calendar_json 복호화
+        if employee_dict.get('google_calendar_json'):
+            employee_dict['google_calendar_json'] = decrypt_data(employee_dict['google_calendar_json'])
+        
+        # google_drive_json 복호화
+        if employee_dict.get('google_drive_json'):
+            employee_dict['google_drive_json'] = decrypt_data(employee_dict['google_drive_json'])
+        
+        # notion_api 복호화
+        if employee_dict.get('notion_api'):
+            employee_dict['notion_api'] = decrypt_data(employee_dict['notion_api'])
+        
+        # slack_api 복호화
+        if employee_dict.get('slack_api'):
+            employee_dict['slack_api'] = decrypt_data(employee_dict['slack_api'])
+        
+        return employee_dict
         
     except psycopg2.Error as e:
         conn.rollback()
@@ -268,7 +365,31 @@ async def get_employees_by_department(dept_id: int):
         """, (dept_id,))
         
         employees = cursor.fetchall()
-        return employees
+        
+        # 암호화된 필드들을 복호화
+        decrypted_employees = []
+        for employee in employees:
+            employee_dict = dict(employee)
+            
+            # google_calendar_json 복호화
+            if employee_dict.get('google_calendar_json'):
+                employee_dict['google_calendar_json'] = decrypt_data(employee_dict['google_calendar_json'])
+            
+            # google_drive_json 복호화
+            if employee_dict.get('google_drive_json'):
+                employee_dict['google_drive_json'] = decrypt_data(employee_dict['google_drive_json'])
+            
+            # notion_api 복호화
+            if employee_dict.get('notion_api'):
+                employee_dict['notion_api'] = decrypt_data(employee_dict['notion_api'])
+            
+            # slack_api 복호화
+            if employee_dict.get('slack_api'):
+                employee_dict['slack_api'] = decrypt_data(employee_dict['slack_api'])
+            
+            decrypted_employees.append(employee_dict)
+        
+        return decrypted_employees
         
     except psycopg2.Error as e:
         raise HTTPException(
@@ -298,7 +419,31 @@ async def get_employees_by_rank(rank_id: int):
         """, (rank_id,))
         
         employees = cursor.fetchall()
-        return employees
+        
+        # 암호화된 필드들을 복호화
+        decrypted_employees = []
+        for employee in employees:
+            employee_dict = dict(employee)
+            
+            # google_calendar_json 복호화
+            if employee_dict.get('google_calendar_json'):
+                employee_dict['google_calendar_json'] = decrypt_data(employee_dict['google_calendar_json'])
+            
+            # google_drive_json 복호화
+            if employee_dict.get('google_drive_json'):
+                employee_dict['google_drive_json'] = decrypt_data(employee_dict['google_drive_json'])
+            
+            # notion_api 복호화
+            if employee_dict.get('notion_api'):
+                employee_dict['notion_api'] = decrypt_data(employee_dict['notion_api'])
+            
+            # slack_api 복호화
+            if employee_dict.get('slack_api'):
+                employee_dict['slack_api'] = decrypt_data(employee_dict['slack_api'])
+            
+            decrypted_employees.append(employee_dict)
+        
+        return decrypted_employees
         
     except psycopg2.Error as e:
         raise HTTPException(
