@@ -26,21 +26,33 @@ def encrypt_data(data: Union[str, Dict[str, Any], list, int, float, bool]) -> by
     return f.encrypt(plain_text.encode("utf-8"))  # bytes 그대로 반환
 
 
-def decrypt_data(encrypted_data: Union[bytes, None], return_type: str = "auto") -> Union[str, Dict[str, Any], list, None]:
+def decrypt_data(encrypted_data: Union[bytes, memoryview, None], return_type: str = "auto") -> Union[str, Dict[str, Any], list, None]:
     """
     암호화된 데이터를 복호화합니다.
 
     Args:
-        encrypted_data: 암호화된 데이터 (bytes, BLOB에서 가져온 값)
+        encrypted_data: 암호화된 데이터 (bytes, memoryview, BLOB에서 가져온 값)
         return_type: 'string', 'json', 'auto'
     """
     if not encrypted_data:
         return None
 
+    # memoryview나 다른 타입을 bytes로 변환
+    if isinstance(encrypted_data, memoryview):
+        encrypted_data = encrypted_data.tobytes()
+    elif not isinstance(encrypted_data, bytes):
+        # 다른 타입의 경우 bytes로 변환 시도
+        try:
+            encrypted_data = bytes(encrypted_data)
+        except (TypeError, ValueError):
+            raise ValueError(f"❌ Unsupported data type for decryption: {type(encrypted_data)}")
+
     try:
         decrypted_string = f.decrypt(encrypted_data).decode("utf-8")
     except InvalidToken:
         raise ValueError("❌ Invalid or corrupted encrypted data.")
+    except Exception as e:
+        raise ValueError(f"❌ Decryption failed: {str(e)}")
 
     if return_type == "string":
         return decrypted_string
