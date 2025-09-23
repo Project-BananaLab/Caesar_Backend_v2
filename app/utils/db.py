@@ -1,5 +1,28 @@
-# backend/db.py
+# app/utils/db.py
 from app.utils.env_loader import env_tokens
+
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_URL = os.getenv("DB_URL")
+if not DB_URL:
+    raise RuntimeError("DB_URL is not set (check your .env)")
+
+engine = create_engine(DB_URL, pool_pre_ping=True, future=True)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 
 # 사용자별 OAuth 토큰 저장소
 user_tokens = {
@@ -9,7 +32,6 @@ user_tokens = {
         "notion": env_tokens["notion"],
     }
 }
-
 
 def get_user_tokens(user_id: str) -> dict:
     """사용자 ID로 토큰 정보 조회"""
