@@ -34,6 +34,9 @@ class AgentQueryResponse(BaseModel):
     query: str = Field(..., description="사용자 질문")
     output: str = Field(..., description="Agent 응답")
     intermediate_steps: List[str] = Field(default=[], description="중간 실행 단계")
+    rag_results: Optional[List[Dict[str, Any]]] = Field(
+        default=[], description="RAG 검색 결과"
+    )
     total_conversations: int = Field(..., description="총 대화 수")
     cost_info: Optional[Dict[str, Any]] = Field(None, description="비용 정보")
 
@@ -91,6 +94,7 @@ async def agent_query(request: AgentQueryRequest):
                 query=request.query,
                 output=result["output"],
                 intermediate_steps=result.get("intermediate_steps", []),
+                rag_results=result.get("rag_results", []),
                 total_conversations=len(chat_history),
             )
         else:

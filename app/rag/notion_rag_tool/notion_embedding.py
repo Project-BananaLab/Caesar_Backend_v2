@@ -11,7 +11,7 @@ import chromadb
 load_dotenv()
 
 # Notion API 토큰과 시작 페이지 ID 설정
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+NOTION_TOKEN = os.getenv("NOTION_TOKEN2")
 START_PAGE_ID = '264120560ff680198c0fefbbe17bfc2c' # Caesar 프로젝트의 시작 페이지 ID
 
 # OpenAI API 키 존재 여부 확인
