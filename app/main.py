@@ -1,4 +1,5 @@
-# main.py http://localhost:8080/auth/google/login  uvicorn app.main:app --reload --port 8080  http://127.0.0.1:8080/docs
+# app/main.py
+# http://localhost:8080/auth/google/login  uvicorn app.main:app --reload --port 8080  http://127.0.0.1:8080/docs
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +11,12 @@ import requests
 from app.agents.agent import run_agent
 from app.utils.db import get_user_tokens, save_user_tokens, get_service_token
 from app.agents.routers.agent_router import router as agent_router
+from app.features.employee.user_router import router as employee_router
+from app.features.login.company.routers import router as company_login_router
 from app.core.config import add_cors_middleware
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(
     title="Multi-Service Agent API",
@@ -18,12 +24,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# CORS 설정 추가
+add_cors_middleware(app)
 
 # 라우터 등록
 app.include_router(agent_router)
-
-from app.features.employee.user_router import router
-app.include_router(router)
+app.include_router(employee_router)
+app.include_router(company_login_router)
 
 # Google OAuth 설정 로드
 try:
