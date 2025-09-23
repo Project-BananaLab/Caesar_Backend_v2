@@ -229,12 +229,68 @@ def run_agent(user_id: str, openai_api_key: str, query: str):
         # 대화 히스토리에 추가
         add_to_chat_history(user_id, query, output)
 
-        # 중간 단계 추출 (도구 호출 로그)
+        # 중간 단계 및 RAG 결과 추출
         intermediate_steps = []
+        rag_results = []
+
         if result and "messages" in result:
             for msg in result["messages"]:
                 if hasattr(msg, "type") and msg.type == "tool":
                     intermediate_steps.append(f"도구 사용: {msg.name}")
+                    # RAG 도구의 응답에서 결과 추출
+                    if hasattr(msg, "content") and msg.name in [
+                        "notion_rag_search",
+                        "internal_rag_search",
+                    ]:
+                        try:
+                            print(
+                                f"🔍 RAG 도구 응답: {msg.name} -> {type(msg.content)}"
+                            )
+                            print(f"🔍 RAG 내용: {str(msg.content)[:300]}...")
+
+                            # 도구 응답이 문자열이면 바로 사용
+                            if (
+                                isinstance(msg.content, str)
+                                and len(msg.content.strip()) > 0
+                            ):
+                                rag_results.append(
+                                    {
+                                        "source": msg.name,
+                                        "content": msg.content.strip(),
+                                        "score": 0.85,
+                                    }
+                                )
+                            elif isinstance(msg.content, list):
+                                # 리스트 형태의 검색 결과 처리
+                                for idx, item in enumerate(msg.content):
+                                    if hasattr(item, "page_content"):
+                                        rag_results.append(
+                                            {
+                                                "source": f"{msg.name}_result_{idx+1}",
+                                                "content": item.page_content,
+                                                "score": getattr(
+                                                    item, "metadata", {}
+                                                ).get("score", 0.8),
+                                            }
+                                        )
+                                    elif isinstance(item, dict):
+                                        rag_results.append(item)
+                                    elif isinstance(item, str):
+                                        rag_results.append(
+                                            {
+                                                "source": f"{msg.name}_result_{idx+1}",
+                                                "content": item,
+                                                "score": 0.8,
+                                            }
+                                        )
+                            elif isinstance(msg.content, dict):
+                                rag_results.append(msg.content)
+
+                            print(f"🔍 추출된 RAG 결과 수: {len(rag_results)}")
+                        except Exception as e:
+                            print(f"RAG 결과 파싱 오류: {e}")
+                            print(f"RAG 메시지 상세: {msg}")
+
                 elif hasattr(msg, "tool_calls") and msg.tool_calls:
                     for tool_call in msg.tool_calls:
                         intermediate_steps.append(f"도구 호출: {tool_call['name']}")
@@ -243,6 +299,7 @@ def run_agent(user_id: str, openai_api_key: str, query: str):
             "success": True,
             "output": output,
             "intermediate_steps": intermediate_steps,
+            "rag_results": rag_results,
             "chat_history": chat_histories.get(user_id, []),
         }
 
