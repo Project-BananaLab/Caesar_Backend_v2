@@ -17,13 +17,13 @@ app = FastAPI(
     description="Google Calendar, Drive, Slack, Notion을 통합 관리하는 AI Agent API",
     version="1.0.0",
 )
-# CORS 설정
-add_cors_middleware(app)
+
 
 # 라우터 등록
 app.include_router(agent_router)
-from app.features.user.router.employee_router import router as employee_router
-app.include_router(employee_router)
+
+from app.features.employee.user_router import router
+app.include_router(router)
 
 # Google OAuth 설정 로드
 try:
@@ -205,9 +205,9 @@ async def google_callback(
         )
 
         # Calendar와 Drive 토큰 모두 저장 (같은 OAuth 앱 사용)
-        with open("google_auth/google_calendar_token.pickle", "wb") as f:
+        with open("credentials/google_calendar_token.pickle", "wb") as f:
             pickle.dump(creds, f)
-        with open("google_auth/google_drive_token.pickle", "wb") as f:
+        with open("credentials/google_drive_token.pickle", "wb") as f:
             pickle.dump(creds, f)
 
         print(f"✅ Pickle 토큰 파일 저장 완료")
