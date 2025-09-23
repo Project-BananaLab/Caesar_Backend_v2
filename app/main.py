@@ -21,8 +21,11 @@ app = FastAPI(
 
 # 라우터 등록
 app.include_router(agent_router)
-from app.features.user.router.employee_router import router as employee_router
-app.include_router(employee_router)
+# from app.features.user.router.employee_router import router as employee_router
+# app.include_router(employee_router)
+
+from app.features.employee.user_router import router
+app.include_router(router)
 
 # Google OAuth 설정 로드
 try:
