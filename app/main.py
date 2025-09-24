@@ -29,8 +29,11 @@ add_cors_middleware(app)
 
 # 라우터 등록
 app.include_router(agent_router)
-app.include_router(employee_router)
+
 app.include_router(company_login_router)
+
+from app.features.employee_google.employee import router as employee_router
+app.include_router(employee_router)
 
 # Google OAuth 설정 로드
 try:
