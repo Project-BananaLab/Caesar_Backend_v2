@@ -11,7 +11,6 @@ import requests
 from app.agents.agent import run_agent
 from app.utils.db import get_user_tokens, save_user_tokens, get_service_token
 from app.agents.routers.agent_router import router as agent_router
-from app.features.employee.user_router import router as employee_router
 from app.features.login.company.routers import router as company_login_router
 from app.core.config import add_cors_middleware
 from dotenv import load_dotenv
