@@ -14,7 +14,7 @@ if langchain_api_key:
     os.environ["LANGCHAIN_PROJECT"] = langchain_project
     print(f"🔍 LangSmith 추적 활성화: {langchain_project}")
 else:
-    print("💡 LangSmith 추적 비활성화 (.env에 LANGCHAIN_API_KEY 추가하면 활성화)")
+    print("")
 
 # Google credentials 파일 경로
 GOOGLE_CALENDAR_CREDENTIALS_PATH = "google_auth/google_calendar_credentials.json"

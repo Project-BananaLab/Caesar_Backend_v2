@@ -1,21 +1,25 @@
 # app/utils/db.py
 from app.utils.env_loader import env_tokens
 
-import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from dotenv import load_dotenv
+from sqlalchemy import create_engine, MetaData
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-load_dotenv()
+from app.core.config import settings
 
-DB_URL = os.getenv("DB_URL")
-if not DB_URL:
-    raise RuntimeError("DB_URL is not set (check your .env)")
+# SQLAlchemy 엔진 (pre-ping으로 끊어진 연결 자동 감지)
+engine = create_engine(settings.DB_URL, pool_pre_ping=True)
 
-engine = create_engine(DB_URL, pool_pre_ping=True, future=True)
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
-Base = declarative_base()
+# 세션 팩토리                                               # 선택: 커밋 후 객체 즉시 재사용할 때 편함
+SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
+
+# Base 클래스 (모든 모델이 상속)
+class Base(DeclarativeBase):
+    # 기본 스키마를 caesar로 설정
+    metadata = MetaData(schema="caesar")
+
+
+# FastAPI 의존성: 요청당 세션 제공
 def get_db():
     db = SessionLocal()
     try:
@@ -32,6 +36,7 @@ user_tokens = {
         "notion": env_tokens["notion"],
     }
 }
+
 
 def get_user_tokens(user_id: str) -> dict:
     """사용자 ID로 토큰 정보 조회"""

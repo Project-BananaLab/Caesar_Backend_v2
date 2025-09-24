@@ -1,5 +1,4 @@
 # app/main.py
-# http://localhost:8080/auth/google/login  uvicorn app.main:app --reload --port 8080  http://127.0.0.1:8080/docs
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,11 +8,23 @@ import os
 import json
 import requests
 from app.agents.agent import run_agent
-from app.utils.db import get_user_tokens, save_user_tokens, get_service_token
+from app.utils.db import (
+    get_user_tokens,
+    save_user_tokens,
+    get_service_token,
+    Base,
+    engine,
+)
 from app.agents.routers.agent_router import router as agent_router
 from app.features.login.company.routers import router as company_login_router
-from app.core.config import add_cors_middleware
+
+# from app.features.admin.routers.files import router as admin_files_router
 from dotenv import load_dotenv
+from app.core.config import settings
+from app.features.employee_google.employee import router as employee_router
+from app.features.chat.router.chat import router as chat_router
+from app.features.channel.router.channel import router as channel_router
+
 
 load_dotenv()
 
@@ -23,16 +34,40 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS 설정 추가
+# ✅ 개발환경: 프론트 도메인만 명시 (와일드카드 X)
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
+def add_cors_middleware(app: FastAPI) -> None:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,  # ← * 대신 정확한 Origin
+        allow_credentials=True,  # 쿠키/인증 허용
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],  # 필요시 좁혀도 됨
+        expose_headers=["*"],
+    )
+
+
 add_cors_middleware(app)
+
+
+@app.on_event("startup")
+def on_startup():
+    # 서버 시작 시 테이블 생성 (이미 있으면 Skip)
+    Base.metadata.create_all(bind=engine)
+
 
 # 라우터 등록
 app.include_router(agent_router)
-
-app.include_router(company_login_router)
-
-from app.features.employee_google.employee import router as employee_router
 app.include_router(employee_router)
+app.include_router(company_login_router)  # 회사 로그인
+# app.include_router(admin_files_router)      # 회사(관리자) 문서 업로드/목록/삭제
+app.include_router(chat_router)
+app.include_router(channel_router)
 
 # Google OAuth 설정 로드
 try:
@@ -384,4 +419,4 @@ if __name__ == "__main__":
     import uvicorn
 
     # redirect_uris와 일치하는 8080 포트에서 실행
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
