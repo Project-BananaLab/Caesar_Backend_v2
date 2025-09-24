@@ -1,12 +1,29 @@
-from fastapi.middleware.cors import CORSMiddleware
+# app/core/config.py
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# CORS 설정 추가
-def add_cors_middleware(app):
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # 개발 환경에서만 사용, 프로덕션에서는 특정 도메인만 허용
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+class Settings(BaseSettings):
+    # ───────── Database ─────────
+    DB_URL: str
+
+    # ───────── JWT ─────────
+    JWT_SECRET_KEY: str
+    ALGORITHM: str
+    ACCESS_EXPIRES_MIN: int = 30
+
+    # ───────── S3 ─────────
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    S3_REGION: str
+    S3_BUCKET: str
+
+    # ───────── ChromaDB ─────────
+    CHROMA_PATH: str
+
+    # ───────── OpenAI ─────────
+    OPENAI_API_KEY: str
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+settings = Settings()

@@ -3,12 +3,13 @@
 
 from sqlalchemy import Column, Integer, String, LargeBinary, ForeignKey
 from sqlalchemy.orm import relationship
-from .database import Base
+from app.utils.db import Base
+
 
 # 'job_dept' 테이블에 매핑될 JobDept 클래스를 정의합니다.
 class JobDept(Base):
     __tablename__ = "job_dept"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     dept_name = Column(String(100), nullable=False)
 
@@ -16,7 +17,7 @@ class JobDept(Base):
 # 'job_rank' 테이블에 매핑될 JobRank 클래스를 정의합니다.
 class JobRank(Base):
     __tablename__ = "job_rank"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     rank_name = Column(String(100), nullable=False)
 
@@ -27,10 +28,10 @@ class Employee(Base):
     __tablename__ = "employee"
 
     # 각 컬럼을 정의합니다.
-    id = Column(Integer, primary_key=True, index=True) # 기본 키
+    id = Column(Integer, primary_key=True, index=True)  # 기본 키
     company_id = Column(Integer)
-    job_dept_id = Column(Integer, ForeignKey('job_dept.id'), nullable=True)
-    job_rank_id = Column(Integer, ForeignKey('job_rank.id'), nullable=True)
+    job_dept_id = Column(Integer, ForeignKey("job_dept.id"), nullable=True)
+    job_rank_id = Column(Integer, ForeignKey("job_rank.id"), nullable=True)
     # 암호화된 API 키는 바이너리 데이터이므로 LargeBinary 타입을 사용합니다.
     notion_api = Column(LargeBinary, nullable=True)
     slack_api = Column(LargeBinary, nullable=True)
@@ -38,7 +39,7 @@ class Employee(Base):
     google_user_id = Column(String(255), unique=True, index=True, nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     full_name = Column(String(100))
-    
+
     # 관계 설정 - 부서와 직급 정보를 쉽게 조회할 수 있습니다.
     job_dept = relationship("JobDept", foreign_keys=[job_dept_id])
     job_rank = relationship("JobRank", foreign_keys=[job_rank_id])

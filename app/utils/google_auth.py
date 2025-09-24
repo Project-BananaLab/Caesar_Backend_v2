@@ -84,5 +84,5 @@ def get_google_service_credentials(service: str, user_id: str):
     # OAuth 인증이 필요함을 알리는 예외 발생
     raise Exception(
         f"{service} 서비스의 유효한 토큰이 없습니다. "
-        f"http://localhost:8080/auth/google/login 에서 인증을 먼저 진행해주세요."
+        f"http://localhost:8000/auth/google/login 에서 인증을 먼저 진행해주세요."
     )
