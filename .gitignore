@@ -8,6 +8,7 @@ __pycache__/
 # 임시 파일
 tmp/__pycache__/
 *.pyc
+tmp/
 
 # ChromaDB
 chroma_data/chroma.sqlite3
