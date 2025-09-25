@@ -1,4 +1,4 @@
-# app/main.py
+# app/main.py uvicorn app.main:app --reload
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +25,11 @@ from app.features.employee_google.employee import router as employee_router
 from app.features.chat.router.chat import router as chat_router
 from app.features.channel.router.channel import router as channel_router
 
+# 모델 임포트 (테이블 생성을 위해)
+from app.features.chat.models.chat_models import Chat
+from app.features.channel.models.channel_models import Channel
+
+
 load_dotenv()
 
 app = FastAPI(
@@ -39,6 +44,7 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
 ]
 
+
 def add_cors_middleware(app: FastAPI) -> None:
     app.add_middleware(
         CORSMiddleware,
@@ -49,18 +55,21 @@ def add_cors_middleware(app: FastAPI) -> None:
         expose_headers=["*"],
     )
 
+
 add_cors_middleware(app)
+
 
 @app.on_event("startup")
 def on_startup():
     # 서버 시작 시 테이블 생성 (이미 있으면 Skip)
     Base.metadata.create_all(bind=engine)
 
+
 # 라우터 등록
 app.include_router(agent_router)
 app.include_router(employee_router)
 app.include_router(company_login_router)  # 회사 로그인
-app.include_router(admin_files_router)      # 회사(관리자) 문서 업로드/목록/삭제
+app.include_router(admin_files_router)  # 회사(관리자) 문서 업로드/목록/삭제
 app.include_router(chat_router)
 app.include_router(channel_router)
 
@@ -174,9 +183,7 @@ async def google_login():
 
 
 @app.get("/auth/google/callback")
-async def google_callback(
-    code: str = None, error: str = None, state: str = None
-):
+async def google_callback(code: str = None, error: str = None, state: str = None):
     """Google OAuth 콜백 처리"""
     print(f"📥 콜백 수신:")
     print(f"   Code: {code[:20] + '...' if code else 'None'}")
@@ -224,26 +231,34 @@ async def google_callback(
 
         tokens = resp.json()
         access_token = tokens.get("access_token")
-        
+
         # 액세스 토큰으로 Google 사용자 정보 가져오기
         print(f"🔄 Google 사용자 정보 요청")
         user_info_resp = requests.get(
             f"https://www.googleapis.com/oauth2/v1/userinfo?access_token={access_token}"
         )
-        
+
         if user_info_resp.status_code != 200:
-            print(f"❌ 사용자 정보 조회 실패: {user_info_resp.status_code} - {user_info_resp.text}")
-            raise HTTPException(status_code=400, detail=f"사용자 정보 조회 실패: {user_info_resp.text}")
-        
+            print(
+                f"❌ 사용자 정보 조회 실패: {user_info_resp.status_code} - {user_info_resp.text}"
+            )
+            raise HTTPException(
+                status_code=400, detail=f"사용자 정보 조회 실패: {user_info_resp.text}"
+            )
+
         user_info = user_info_resp.json()
         google_user_id = user_info.get("id")  # Google User ID
         user_name = user_info.get("name", "Unknown")
         user_email = user_info.get("email", "Unknown")
-        
+
         if not google_user_id:
-            raise HTTPException(status_code=400, detail="Google 사용자 ID를 가져올 수 없습니다.")
-        
-        print(f"✅ 토큰 교환 성공 - Google User ID: {google_user_id}, Name: {user_name}, Email: {user_email}")
+            raise HTTPException(
+                status_code=400, detail="Google 사용자 ID를 가져올 수 없습니다."
+            )
+
+        print(
+            f"✅ 토큰 교환 성공 - Google User ID: {google_user_id}, Name: {user_name}, Email: {user_email}"
+        )
 
         # 토큰 저장 (DB와 pickle 파일 모두) - 이제 실제 google_user_id 사용
         save_user_tokens(google_user_id, "google", tokens)
