@@ -1,6 +1,6 @@
+# app/rag/internal_data_rag/internal_ingest.py
 # -*- coding: utf-8 -*-
 # 문서 임베딩 및 ChromaDB 저장 서비스
-# app/rag/internal_data_rag/internal_ingest.py
 
 import os
 import sys
@@ -31,12 +31,12 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "inside_data")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))       # 청크 크기
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "150"))  # 오버랩
 
-# 📝 엑셀 파일 처리 제한 설정
+# 엑셀 파일 처리 제한 설정
 XLSX_MAX_ROWS_PER_SHEET = int(os.getenv("XLSX_MAX_ROWS_PER_SHEET", "10000"))
 XLSX_MAX_COLS_PER_SHEET = int(os.getenv("XLSX_MAX_COLS_PER_SHEET", "512"))
 XLSX_SKIP_HIDDEN_SHEETS = os.getenv("XLSX_SKIP_HIDDEN_SHEETS", "true").lower() == "true"
 
-# 📝 임베딩 API 요청 배치 제한
+# 임베딩 API 요청 배치 제한
 EMBED_MAX_TOKENS_PER_REQUEST = int(os.getenv("EMBED_MAX_TOKENS_PER_REQUEST", "280000"))
 EMBED_MAX_ITEMS_PER_REQUEST = int(os.getenv("EMBED_MAX_ITEMS_PER_REQUEST", "256"))
 
@@ -145,7 +145,7 @@ class IngestService:
             chunk_overlap=CHUNK_OVERLAP,
             separators=["\n\n", "\n", " ", ""]
         )
-        # 📝 지원되는 파일 확장자 (쉬운 것부터 추가)
+        # 지원되는 파일 확장자
         self.supported_extensions = {".pdf", ".docx", ".xlsx", ".csv", ".txt"}
 
     # ========================= 파일 파싱 =========================
@@ -196,7 +196,7 @@ class IngestService:
                 acc.append(f"\n### [Sheet] {ws.title}")
                 rows = 0
 
-                # 📝 열 상한 캡을 openpyxl 레벨에서 바로 적용
+                # 열 상한 캡을 openpyxl 레벨에서 바로 적용
                 iter_kwargs = {"values_only": True}
                 if XLSX_MAX_COLS_PER_SHEET and XLSX_MAX_COLS_PER_SHEET > 0:
                     iter_kwargs["max_col"] = XLSX_MAX_COLS_PER_SHEET
@@ -206,7 +206,7 @@ class IngestService:
                         acc.append(f"...(truncated at {XLSX_MAX_ROWS_PER_SHEET} rows)")
                         break
 
-                    # 📝 행 우측의 빈 열 트리밍: 실제 값이 있는 마지막 열까지만 사용
+                    # 행 우측의 빈 열 트리밍: 실제 값이 있는 마지막 열까지만 사용
                     last = -1
                     # (열 캡이 적용된 범위 내에서만 검사)
                     for i, v in enumerate(row):
@@ -217,12 +217,12 @@ class IngestService:
                     if last < 0:
                         continue  # 완전 빈 행은 스킵
 
-                    # 📝 최종 사용할 열 폭 결정
+                    # 최종 사용할 열 폭 결정
                     width = last + 1
                     if XLSX_MAX_COLS_PER_SHEET and XLSX_MAX_COLS_PER_SHEET > 0:
                         width = min(width, XLSX_MAX_COLS_PER_SHEET)
 
-                    # 📝 최종 문자열 구성
+                    # 최종 문자열 구성
                     row_vals = []
                     for v in row[:width]:
                         row_vals.append("" if v is None else str(v).strip())
@@ -236,7 +236,7 @@ class IngestService:
             # 암호화/손상/비정상 구조 등 명확한 메시지 전달
             raise ValueError(f"엑셀 로드 실패: {type(e).__name__}: {e}")
         finally:
-            # 📝 Excel 워크북 명시적으로 닫기 (임시 파일 정리 문제 해결)
+            # Excel 워크북 명시적으로 닫기 (임시 파일 정리 문제 해결)
             if wb is not None:
                 try:
                     wb.close()
@@ -261,7 +261,7 @@ class IngestService:
                     reader = csv.reader(f)
                 
                 for row_num, row in enumerate(reader):
-                    if row_num > 10000:  # 📝 행 수 제한 (메모리 보호)
+                    if row_num > 10000:  # 행 수 제한 (메모리 보호)
                         acc.append("...(truncated at 10000 rows)")
                         break
                     
@@ -478,13 +478,10 @@ class IngestService:
             print(f"❌ 파일 처리 중 오류 발생: {str(e)}")
             return 0, False
 
-    # 📝 기존 단일 파일 처리 메서드는 더 이상 사용하지 않음 (ingest_single_file_with_metadata 사용)
+    # 기존 단일 파일 처리 메서드는 더 이상 사용하지 않음 (ingest_single_file_with_metadata 사용)
+    # 다중 파일 처리 기능은 관리자 업로드에서 사용하지 않으므로 제거
 
-    # 📝 다중 파일 처리 기능은 관리자 업로드에서 사용하지 않으므로 제거
-
-
-# 📝 불필요한 편의 함수 제거 - IngestService 클래스를 직접 사용
-
+    # 불필요한 편의 함수 제거 - IngestService 클래스를 직접 사용
 
 # ========================= CLI =========================
 def main():
@@ -507,7 +504,7 @@ def main():
 
         if path_obj.is_file():  # 단일 파일 처리
             print("📄 단일 파일 모드")
-            # 📝 개별 파일 테스트용 - 실제 관리자 업로드는 file_ingest_service.py 사용
+            # 개별 파일 테스트용 - 실제 관리자 업로드는 file_ingest_service.py 사용
             svc = IngestService()
             success = svc.ingest_single_file_with_metadata(
                 str(path_obj),

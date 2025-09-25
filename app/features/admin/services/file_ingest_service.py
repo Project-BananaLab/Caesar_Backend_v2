@@ -11,9 +11,13 @@ import traceback
 from app.features.admin.models.docs import Doc
 from app.features.login.company.models import Company
 from app.features.admin.services.s3_service import (
-    put_file_and_checksum,
+    put_file_if_absent,
+    sha256_bytes,
     delete_object_by_url,
 )
+
+from sqlalchemy.exc import IntegrityError  # ← 경합 처리용 (선택)
+
 from app.rag.internal_data_rag.internal_ingest import IngestService
 
 
@@ -39,20 +43,40 @@ def handle_upload_and_ingest(
 ) -> dict:
     """
     업로드 전체 파이프라인:
-      1) S3 업로드
-      2) docs INSERT ('processing')
-      3) IngestService 로 Chroma 인덱싱 (회사코드 컬렉션)
-      4) docs UPDATE (succeeded/failed)
-      5) (선택) 실패 시 S3 롤백 시도
-    반환: {"ok": bool, "docId": int, "chunks"?: int, "url"?: str, "error"?: str}
+      1) 바이트 해시 계산 → 동일(회사+해시) 문서 존재 시 재사용
+      2) (필요 시) S3 업로드 (내용주소화)
+      3) docs INSERT ('processing')
+      4) IngestService 로 Chroma 인덱싱 (회사코드 컬렉션)
+      5) docs UPDATE (succeeded/failed)
+      6) (선택) 실패 시 S3 롤백 시도
+    반환: {"ok": bool, "docId": int, "chunks"?: int, "url"?: str, "error"?: str, "duplicated"?: bool}
     """
-    # ── 1) S3 업로드 (인자명 file_bytes 사용!)
-    s3_url, size, checksum = put_file_and_checksum(
+    # 0) 해시 선계산
+    checksum = sha256_bytes(file_bytes)
+
+    # 1) 동일(회사, 해시) 문서 선조회 → 있으면 기존 레코드 재사용
+    existing = db.execute(
+        select(Doc).where(Doc.company_id == company_id, Doc.checksum_sha256 == checksum)
+    ).scalars().first()
+
+    if existing:
+        # 이미 같은 내용이 인덱싱되어 있는 케이스
+        return {
+            "ok": True,
+            "duplicated": True,
+            "docId": existing.id,
+            "chunks": existing.chunks_count,
+            "url": existing.file_url,
+        }
+
+    # ── 2) S3 업로드 (내용주소화 방식으로: 같은 내용은 물리적으로 1회만 업로드)
+    s3_url, size, checksum_hex, uploaded_new = put_file_if_absent(
         file_bytes=file_bytes,
         orig_name=file_name,
+        checksum_hex=checksum,
     )
 
-    # ── 2) docs INSERT (processing)
+    # ── 3) docs INSERT (processing)
     doc = Doc(
         company_id=company_id,
         employee_id=employee_id,          # 관리자 업로드면 None
@@ -60,7 +84,7 @@ def handle_upload_and_ingest(
         file_name=file_name,
         file_url=s3_url,
         file_size=size,
-        checksum_sha256=checksum,
+        checksum_sha256=checksum_hex,
         ingest_status="processing",       # 초기 상태
         chunks_count=0,
         error_text=None,
@@ -69,14 +93,34 @@ def handle_upload_and_ingest(
         ingested_at=None,
     )
     db.add(doc)
-    db.commit()
+
+    # UNIQUE 제약(회사+해시)과 경합 시 안전 처리
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # 레이스: 다른 트랜잭션이 방금 생성했다면 그대로 재사용
+        winner = db.execute(
+            select(Doc).where(Doc.company_id == company_id, Doc.checksum_sha256 == checksum)
+        ).scalars().first()
+        if winner:
+            return {
+                "ok": True,
+                "duplicated": True,
+                "docId": winner.id,
+                "chunks": winner.chunks_count,
+                "url": winner.file_url,
+            }
+        # 예외가 다른 원인이라면 다시 던져도 됨
+        raise
+
     db.refresh(doc)  # doc.id 확보(→ VectorDB 메타 doc_id 로 사용)
 
-    # ── 3) ingest (회사코드 컬렉션 + extra 메타 병합)
+    # ── 4) ingest (회사코드 컬렉션 + extra 메타 병합)
     try:
         company_code = _get_company_code(db, company_id)
 
-        # 📝 Chroma 메타데이터는 기본 타입만 허용 (None 값 제외)
+        # Chroma 메타데이터는 기본 타입만 허용 (None 값 제외)
         extra_meta = {
             "doc_id": int(doc.id),
             "company_id": int(company_id),
@@ -85,7 +129,7 @@ def handle_upload_and_ingest(
         if employee_id is not None:
             extra_meta["user_id"] = int(employee_id)
 
-        # 📝 임시 디렉터리에 파일 저장 후 청킹 진행
+        # 임시 디렉터리에 파일 저장 후 청킹 진행
         import time
         import gc
         
@@ -96,7 +140,7 @@ def handle_upload_and_ingest(
                 f.write(file_bytes)
 
             svc = IngestService()
-            # 📝 회사별 컬렉션으로 청킹 및 임베딩 저장
+            # 회사별 컬렉션으로 청킹 및 임베딩 저장
             chunks_count, ok = svc.ingest_single_file_with_metadata(
                 local_path,
                 collection_name=company_code,  # 회사코드별 컬렉션
@@ -104,12 +148,12 @@ def handle_upload_and_ingest(
                 show_preview=False
             )
             
-            # 📝 Excel 파일 처리 후 리소스 정리 대기
+            # Excel 파일 처리 후 리소스 정리 대기
             time.sleep(0.1)  # 잠시 대기하여 파일 핸들 해제
             gc.collect()     # 가비지 컬렉션 강제 실행
             
         finally:
-            # 📝 임시 디렉터리 안전하게 정리
+            # 임시 디렉터리 안전하게 정리
             try:
                 import shutil
                 shutil.rmtree(td, ignore_errors=True)
@@ -132,7 +176,7 @@ def handle_upload_and_ingest(
 
             return {"ok": False, "docId": doc.id, "error": "ingest_failed"}
 
-        # ── 4) docs UPDATE (성공)
+        # ── 5) docs UPDATE (성공)
         doc.ingest_status = "succeeded"
         doc.chunks_count = chunks_count
         doc.ingested_at = datetime.utcnow()
@@ -140,7 +184,14 @@ def handle_upload_and_ingest(
         db.add(doc)
         db.commit()
 
-        return {"ok": True, "docId": doc.id, "chunks": chunks_count, "url": s3_url}
+        return {
+            "ok": True,
+            "duplicated": False,
+            "docId": doc.id,
+            "chunks": chunks_count,
+            "url": s3_url,
+            "uploadedNewToS3": uploaded_new,  # 참고용
+        }
 
     except Exception as e:
         # 실패 시 상태/에러 메시지 남김
