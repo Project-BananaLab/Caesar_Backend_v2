@@ -175,14 +175,13 @@ async def google_login():
 
 @app.get("/auth/google/callback")
 async def google_callback(
-    code: str = None, user_id: str = "user_123", error: str = None, state: str = None
+    code: str = None, error: str = None, state: str = None
 ):
     """Google OAuth 콜백 처리"""
     print(f"📥 콜백 수신:")
     print(f"   Code: {code[:20] + '...' if code else 'None'}")
     print(f"   Error: {error}")
     print(f"   State: {state}")
-    print(f"   User ID: {user_id}")
 
     if not CLIENT_ID:
         raise HTTPException(
@@ -224,10 +223,30 @@ async def google_callback(
             raise HTTPException(status_code=400, detail=f"토큰 교환 실패: {resp.text}")
 
         tokens = resp.json()
-        print(f"✅ 토큰 교환 성공: {user_id}")
+        access_token = tokens.get("access_token")
+        
+        # 액세스 토큰으로 Google 사용자 정보 가져오기
+        print(f"🔄 Google 사용자 정보 요청")
+        user_info_resp = requests.get(
+            f"https://www.googleapis.com/oauth2/v1/userinfo?access_token={access_token}"
+        )
+        
+        if user_info_resp.status_code != 200:
+            print(f"❌ 사용자 정보 조회 실패: {user_info_resp.status_code} - {user_info_resp.text}")
+            raise HTTPException(status_code=400, detail=f"사용자 정보 조회 실패: {user_info_resp.text}")
+        
+        user_info = user_info_resp.json()
+        google_user_id = user_info.get("id")  # Google User ID
+        user_name = user_info.get("name", "Unknown")
+        user_email = user_info.get("email", "Unknown")
+        
+        if not google_user_id:
+            raise HTTPException(status_code=400, detail="Google 사용자 ID를 가져올 수 없습니다.")
+        
+        print(f"✅ 토큰 교환 성공 - Google User ID: {google_user_id}, Name: {user_name}, Email: {user_email}")
 
-        # 토큰 저장 (DB와 pickle 파일 모두)
-        save_user_tokens(user_id, "google", tokens)
+        # 토큰 저장 (DB와 pickle 파일 모두) - 이제 실제 google_user_id 사용
+        save_user_tokens(google_user_id, "google", tokens)
 
         # Google API 클라이언트에서 사용할 수 있도록 pickle 파일로도 저장
         import pickle
@@ -253,8 +272,11 @@ async def google_callback(
 
         return {
             "status": "success",
-            "message": f"Google 인증이 완료되었습니다. 사용자 ID: {user_id}",
-            "user_id": user_id,
+            "message": f"Google 인증이 완료되었습니다. 사용자: {user_name} ({user_email})",
+            "user_id": google_user_id,
+            "google_user_id": google_user_id,
+            "user_name": user_name,
+            "user_email": user_email,
             "tokens_saved": True,
         }
 

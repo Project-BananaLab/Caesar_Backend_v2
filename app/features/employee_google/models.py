@@ -1,5 +1,5 @@
 # models.py
-# SQLAlchemy ORM 모델을 정의하여 데이터베이스 테이블과 파이썬 클래스를 매핑합니다.
+# SQLAlchemy ORM 모델을 정의하여 데이터베이스 테이블과 파이썬 클래스를 매핑합니다. 
 
 from sqlalchemy import Column, Integer, String, LargeBinary, ForeignKey
 from sqlalchemy.orm import relationship
