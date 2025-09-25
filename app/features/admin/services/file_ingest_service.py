@@ -76,8 +76,7 @@ def handle_upload_and_ingest(
     try:
         company_code = _get_company_code(db, company_id)
 
-        # 🔴 None이 들어가면 Chroma가 메타데이터 에러를 냅니다.
-        #     → None은 아예 넣지 말고, 기본 타입만 사용
+        # 📝 Chroma 메타데이터는 기본 타입만 허용 (None 값 제외)
         extra_meta = {
             "doc_id": int(doc.id),
             "company_id": int(company_id),
@@ -86,18 +85,36 @@ def handle_upload_and_ingest(
         if employee_id is not None:
             extra_meta["user_id"] = int(employee_id)
 
-        with tempfile.TemporaryDirectory() as td:
+        # 📝 임시 디렉터리에 파일 저장 후 청킹 진행
+        import time
+        import gc
+        
+        td = tempfile.mkdtemp()
+        try:
             local_path = os.path.join(td, file_name)
             with open(local_path, "wb") as f:
                 f.write(file_bytes)
 
             svc = IngestService()
+            # 📝 회사별 컬렉션으로 청킹 및 임베딩 저장
             chunks_count, ok = svc.ingest_single_file_with_metadata(
                 local_path,
-                collection_name=company_code,  # ← 회사코드 컬렉션
+                collection_name=company_code,  # 회사코드별 컬렉션
                 extra_meta=extra_meta,
                 show_preview=False
             )
+            
+            # 📝 Excel 파일 처리 후 리소스 정리 대기
+            time.sleep(0.1)  # 잠시 대기하여 파일 핸들 해제
+            gc.collect()     # 가비지 컬렉션 강제 실행
+            
+        finally:
+            # 📝 임시 디렉터리 안전하게 정리
+            try:
+                import shutil
+                shutil.rmtree(td, ignore_errors=True)
+            except Exception:
+                pass
 
         if not ok:
             # 실패 → 상태 저장, 에러 메시지
