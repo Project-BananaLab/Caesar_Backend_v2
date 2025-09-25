@@ -151,3 +151,4 @@ passlib
 pdfplumber
 python-multipart
 boto3
+langchain-text-splitters

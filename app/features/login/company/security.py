@@ -12,7 +12,7 @@ def create_access_token(company_id: int, co_id: str, role: str) -> str:
     iat = _now()
     exp = iat + timedelta(minutes=settings.ACCESS_EXPIRES_MIN)
     payload = {
-        "co_id": co_id,               # 회사 계정ID
+        "co_id": co_id,             # 회사 계정ID
         "companyId": company_id,    # 회사 primary key
         "role": role,               # 'admin'
         "iat": int(iat.timestamp()),
