@@ -53,3 +53,97 @@ def save_user_tokens(user_id: str, service: str, tokens: dict):
 def get_service_token(user_id: str, service: str) -> dict:
     """특정 서비스의 토큰 조회"""
     return user_tokens.get(user_id, {}).get(service, {})
+
+
+def get_user_api_tokens_from_db(google_user_id: str) -> dict:
+    """
+    데이터베이스에서 사용자별 API 토큰을 조회합니다.
+    google_user_id로 조회하여 notion_api와 slack_api를 반환합니다.
+    """
+    from app.features.employee_google.crud import get_employee_by_google_id
+    from app.utils.crypto_utils import decrypt_data
+    
+    print(f"🔍 DB에서 토큰 조회 시작 - Google User ID: {google_user_id}")
+    
+    db = SessionLocal()
+    try:
+        employee = get_employee_by_google_id(db, google_user_id)
+        if not employee:
+            print(f"❌ 사용자를 찾을 수 없습니다 - Google User ID: {google_user_id}")
+            return {}
+        
+        print(f"✅ 사용자 찾음 - ID: {employee.id}, 이름: {employee.full_name}, 이메일: {employee.email}")    
+        print(f"🔍 Notion API 필드 존재 여부: {employee.notion_api is not None}")
+        print(f"🔍 Slack API 필드 존재 여부: {employee.slack_api is not None}")
+            
+        tokens = {}
+        
+        # Notion API 토큰 복호화
+        if employee.notion_api:
+            try:
+                print(f"🔓 Notion 토큰 복호화 시도 중...")
+                notion_token = decrypt_data(employee.notion_api, "string")
+                tokens["notion"] = {"token": notion_token}
+                print(f"✅ Notion 토큰 복호화 성공 - 토큰 길이: {len(notion_token)}")
+            except Exception as e:
+                print(f"❌ Notion 토큰 복호화 실패: {e}")
+        else:
+            print("❌ Notion API 토큰이 데이터베이스에 저장되어 있지 않습니다.")
+        
+        # Slack API 토큰 복호화  
+        if employee.slack_api:
+            try:
+                print(f"🔓 Slack 토큰 복호화 시도 중...")
+                slack_token = decrypt_data(employee.slack_api, "string")
+                tokens["slack"] = {"user_token": slack_token}
+                print(f"✅ Slack 토큰 복호화 성공 - 토큰 길이: {len(slack_token)}")
+            except Exception as e:
+                print(f"❌ Slack 토큰 복호화 실패: {e}")
+        else:
+            print("❌ Slack API 토큰이 데이터베이스에 저장되어 있지 않습니다.")
+        
+        print(f"🎯 최종 반환 토큰: {list(tokens.keys())}")
+        return tokens
+        
+    finally:
+        db.close()
+
+
+def get_service_token_enhanced(user_id: str, service: str) -> dict:
+    """
+    특정 서비스의 토큰 조회 (DB에서 사용자별 토큰 우선 조회)
+    1. 먼저 DB에서 google_user_id로 사용자별 토큰 조회
+    2. 없으면 기존 메모리 저장소에서 조회
+    3. 그것도 없으면 env_tokens에서 기본값 조회
+    """
+    print(f"🔍 get_service_token_enhanced 호출 - User ID: {user_id}, Service: {service}")
+    
+    # 1. DB에서 사용자별 토큰 조회
+    db_tokens = get_user_api_tokens_from_db(user_id)
+    print(f"🔍 DB에서 조회된 토큰들: {list(db_tokens.keys())}")
+    
+    if service in db_tokens:
+        print(f"✅ DB에서 {service} 토큰 찾음")
+        return db_tokens[service]
+    else:
+        print(f"❌ DB에서 {service} 토큰을 찾을 수 없음")
+    
+    # # 2. 기존 메모리 저장소에서 조회 (잘 되면 삭제 해도 무방)
+    # from app.utils.env_loader import env_tokens
+    # user_service_token = user_tokens.get(user_id, {}).get(service)
+    # if user_service_token:
+    #     print(f"✅ 메모리에서 {service} 토큰 찾음")
+    #     return user_service_token
+    # else:
+    #     print(f"❌ 메모리에서 {service} 토큰을 찾을 수 없음")
+        
+    # # 3. env_tokens에서 기본값 조회
+    # env_token = env_tokens.get(service, {})
+    # if env_token:
+    #     print(f"✅ 환경변수에서 {service} 토큰 찾음")
+    #     return env_token
+    # else:
+    #     print(f"❌ 환경변수에서 {service} 토큰을 찾을 수 없음")
+        
+    # print(f"❌ 모든 소스에서 {service} 토큰을 찾을 수 없음")
+    # return {}
