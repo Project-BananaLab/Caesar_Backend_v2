@@ -16,28 +16,36 @@ def sha256_bytes(data: bytes) -> str:
     h.update(data)
     return h.hexdigest()
 
-def put_file_and_checksum(file_bytes: bytes, *, orig_name: str) -> tuple[str, int, str]:
+# 내용 주소화(content-addressable) 업로드 — 동일 내용이면 물리 파일 재사용
+def put_file_if_absent(file_bytes: bytes, *, orig_name: str, checksum_hex: str) -> tuple[str, int, str, bool]:
     """
-    파일 바이트를 S3에 업로드하고, URL/사이즈/체크섬을 반환한다.
-    - file_bytes     : 파일 바이트
-    - orig_name   : 원본 파일명 (확장자/Content-Type 추정)
-    return        : (s3_url, size, checksum_sha256)
+    파일 바이트를 '내용 해시(checksum_hex)'를 키로 사용하여 S3에 저장한다.
+    이미 존재하면 업로드를 건너뛰고 기존 객체를 재사용한다.
+    return: (s3_url, size, checksum_hex, uploaded_new)
     """
     size = len(file_bytes)
-    checksum = sha256_bytes(file_bytes)
     ext = ""
     if "." in orig_name:
         ext = "." + orig_name.split(".")[-1].lower()
-    key = f"uploads/{uuid.uuid4().hex}{ext}"
+
+    key = f"uploads/{checksum_hex}{ext}"  # ← 핵심: 내용 기반 키
     content_type, _ = mimetypes.guess_type(orig_name)
-    s3.put_object(
-        Bucket=settings.S3_BUCKET,
-        Key=key,
-        Body=file_bytes,
-        ContentType=content_type or "application/octet-stream",
-    )
+
+    # 이미 존재하는지 HEAD로 검사
+    try:
+        s3.head_object(Bucket=settings.S3_BUCKET, Key=key)
+        uploaded_new = False
+    except s3.exceptions.ClientError:
+        s3.put_object(
+            Bucket=settings.S3_BUCKET,
+            Key=key,
+            Body=file_bytes,
+            ContentType=content_type or "application/octet-stream",
+        )
+        uploaded_new = True
+
     url = f"https://{settings.S3_BUCKET}.s3.{settings.S3_REGION}.amazonaws.com/{key}"
-    return url, size, checksum
+    return url, size, checksum_hex, uploaded_new
 
 def delete_object_by_url(s3_url: str) -> None:
     """
