@@ -148,3 +148,7 @@ PyJWT
 pydantic[email]
 python-jose[cryptography]
 passlib
+pdfplumber
+python-multipart
+boto3
+langchain-text-splitters

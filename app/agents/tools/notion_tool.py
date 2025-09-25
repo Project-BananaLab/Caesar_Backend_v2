@@ -10,18 +10,20 @@ def create_notion_tools(user_id: str):
 
     def get_notion_headers():
         """Notion API 헤더 생성"""
-        token_info = get_service_token(user_id, "notion")
+        from app.utils.db import get_service_token_enhanced
+        
+        token_info = get_service_token_enhanced(user_id, "notion")
         print(f"🔍 노션 토큰 정보: {token_info}")
 
         if not token_info:
             raise Exception(
-                "Notion 토큰이 없습니다. .env 파일에 NOTION_TOKEN을 설정해주세요."
+                "Notion 토큰이 없습니다. 직원 DB에 NOTION_API를 설정하거나 .env 파일에 NOTION_TOKEN을 설정해주세요."
             )
 
         token = token_info.get("token")
         if not token:
             raise Exception(
-                "Notion 토큰이 없습니다. .env 파일에 NOTION_TOKEN을 설정해주세요."
+                "Notion 토큰이 없습니다. 직원 DB에 NOTION_API를 설정하거나 .env 파일에 NOTION_TOKEN을 설정해주세요."
             )
 
         print(f"🔑 노션 토큰 (앞 10자): {token[:10]}...")

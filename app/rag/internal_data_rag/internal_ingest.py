@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 # 문서 임베딩 및 ChromaDB 저장 서비스
-# internal_ingest.py
+# app/rag/internal_data_rag/internal_ingest.py
 
 import os
 import sys
-import time
 import zipfile
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
 import pdfplumber
 import docx
@@ -32,12 +31,12 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "inside_data")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))       # 청크 크기
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "150"))  # 오버랩
 
-# 엑셀 폭발 방지 옵션
+# 📝 엑셀 파일 처리 제한 설정
 XLSX_MAX_ROWS_PER_SHEET = int(os.getenv("XLSX_MAX_ROWS_PER_SHEET", "10000"))
-XLSX_MAX_COLS_PER_SHEET = int(os.getenv("XLSX_MAX_COLS_PER_SHEET", "512"))     # 🔹 추가: 열 상한 캡
+XLSX_MAX_COLS_PER_SHEET = int(os.getenv("XLSX_MAX_COLS_PER_SHEET", "512"))
 XLSX_SKIP_HIDDEN_SHEETS = os.getenv("XLSX_SKIP_HIDDEN_SHEETS", "true").lower() == "true"
 
-# 임베딩 요청 배치 한도 (요청당 토큰 상한 300k 대비 여유)
+# 📝 임베딩 API 요청 배치 제한
 EMBED_MAX_TOKENS_PER_REQUEST = int(os.getenv("EMBED_MAX_TOKENS_PER_REQUEST", "280000"))
 EMBED_MAX_ITEMS_PER_REQUEST = int(os.getenv("EMBED_MAX_ITEMS_PER_REQUEST", "256"))
 
@@ -146,7 +145,8 @@ class IngestService:
             chunk_overlap=CHUNK_OVERLAP,
             separators=["\n\n", "\n", " ", ""]
         )
-        self.supported_extensions = {".pdf", ".docx", ".xlsx"}
+        # 📝 지원되는 파일 확장자 (쉬운 것부터 추가)
+        self.supported_extensions = {".pdf", ".docx", ".xlsx", ".csv", ".txt"}
 
     # ========================= 파일 파싱 =========================
     def read_pdf(self, path: Path) -> str:  # PDF 파일 파싱
@@ -177,62 +177,139 @@ class IngestService:
         return "\n".join(acc)
 
     def read_xlsx(self, path: Path) -> str:  # XLSX 파일 파싱 (폭주 방지 트리밍/캡 적용)
+        wb = None
         try:
             wb = openpyxl.load_workbook(str(path), data_only=True, read_only=True)
+            
+            if not wb.worksheets:
+                raise ValueError("엑셀에 워크시트가 없습니다.")
+
+            acc: List[str] = []
+            for ws in wb.worksheets:
+                # 숨김 시트 스킵 옵션
+                try:
+                    if XLSX_SKIP_HIDDEN_SHEETS and getattr(ws, "sheet_state", "visible") != "visible":
+                        continue
+                except Exception:
+                    pass
+
+                acc.append(f"\n### [Sheet] {ws.title}")
+                rows = 0
+
+                # 📝 열 상한 캡을 openpyxl 레벨에서 바로 적용
+                iter_kwargs = {"values_only": True}
+                if XLSX_MAX_COLS_PER_SHEET and XLSX_MAX_COLS_PER_SHEET > 0:
+                    iter_kwargs["max_col"] = XLSX_MAX_COLS_PER_SHEET
+
+                for row in ws.iter_rows(**iter_kwargs):
+                    if rows >= XLSX_MAX_ROWS_PER_SHEET:
+                        acc.append(f"...(truncated at {XLSX_MAX_ROWS_PER_SHEET} rows)")
+                        break
+
+                    # 📝 행 우측의 빈 열 트리밍: 실제 값이 있는 마지막 열까지만 사용
+                    last = -1
+                    # (열 캡이 적용된 범위 내에서만 검사)
+                    for i, v in enumerate(row):
+                        sv = (str(v).strip() if v is not None else "")
+                        if sv != "":
+                            last = i
+
+                    if last < 0:
+                        continue  # 완전 빈 행은 스킵
+
+                    # 📝 최종 사용할 열 폭 결정
+                    width = last + 1
+                    if XLSX_MAX_COLS_PER_SHEET and XLSX_MAX_COLS_PER_SHEET > 0:
+                        width = min(width, XLSX_MAX_COLS_PER_SHEET)
+
+                    # 📝 최종 문자열 구성
+                    row_vals = []
+                    for v in row[:width]:
+                        row_vals.append("" if v is None else str(v).strip())
+
+                    acc.append(" | ".join(row_vals))
+                    rows += 1
+
+            return "\n".join(acc)
+            
         except Exception as e:
             # 암호화/손상/비정상 구조 등 명확한 메시지 전달
             raise ValueError(f"엑셀 로드 실패: {type(e).__name__}: {e}")
+        finally:
+            # 📝 Excel 워크북 명시적으로 닫기 (임시 파일 정리 문제 해결)
+            if wb is not None:
+                try:
+                    wb.close()
+                except Exception:
+                    pass
 
-        if not wb.worksheets:
-            raise ValueError("엑셀에 워크시트가 없습니다.")
-
-        acc: List[str] = []
-        for ws in wb.worksheets:
-            # 숨김 시트 스킵 옵션
+    def read_csv(self, path: Path) -> str:  # CSV 파일 파싱
+        """CSV 파일을 텍스트로 변환 (테이블 형태 유지)"""
+        import csv
+        try:
+            acc: List[str] = []
+            with open(path, 'r', encoding='utf-8-sig', newline='') as f:
+                # CSV 방언 자동 감지 시도
+                try:
+                    sample = f.read(2048)
+                    f.seek(0)
+                    dialect = csv.Sniffer().sniff(sample)
+                    reader = csv.reader(f, dialect)
+                except Exception:
+                    # 감지 실패 시 기본 설정 사용
+                    f.seek(0)
+                    reader = csv.reader(f)
+                
+                for row_num, row in enumerate(reader):
+                    if row_num > 10000:  # 📝 행 수 제한 (메모리 보호)
+                        acc.append("...(truncated at 10000 rows)")
+                        break
+                    
+                    # 빈 행 스킵
+                    if not any(cell.strip() for cell in row):
+                        continue
+                    
+                    # 테이블 형태로 파이프 구분자 사용
+                    acc.append(" | ".join(str(cell).strip() for cell in row))
+                    
+            return "\n".join(acc)
+            
+        except UnicodeDecodeError:
+            # UTF-8 실패 시 다른 인코딩 시도
             try:
-                if XLSX_SKIP_HIDDEN_SHEETS and getattr(ws, "sheet_state", "visible") != "visible":
-                    continue
-            except Exception:
-                pass
+                with open(path, 'r', encoding='cp949', newline='') as f:
+                    reader = csv.reader(f)
+                    acc = []
+                    for row_num, row in enumerate(reader):
+                        if row_num > 10000:
+                            acc.append("...(truncated at 10000 rows)")
+                            break
+                        if not any(cell.strip() for cell in row):
+                            continue
+                        acc.append(" | ".join(str(cell).strip() for cell in row))
+                    return "\n".join(acc)
+            except Exception as e:
+                raise ValueError(f"CSV 인코딩 로드 실패: {type(e).__name__}: {e}")
+        except Exception as e:
+            raise ValueError(f"CSV 로드 실패: {type(e).__name__}: {e}")
 
-            acc.append(f"\n### [Sheet] {ws.title}")
-            rows = 0
-
-            # 🔹 열 상한 캡을 openpyxl 레벨에서 바로 적용
-            iter_kwargs = {"values_only": True}
-            if XLSX_MAX_COLS_PER_SHEET and XLSX_MAX_COLS_PER_SHEET > 0:
-                iter_kwargs["max_col"] = XLSX_MAX_COLS_PER_SHEET
-
-            for row in ws.iter_rows(**iter_kwargs):
-                if rows >= XLSX_MAX_ROWS_PER_SHEET:
-                    acc.append(f"...(truncated at {XLSX_MAX_ROWS_PER_SHEET} rows)")
-                    break
-
-                # 🔹 행 우측의 빈 열 트리밍: 실제 값이 있는 마지막 열까지만 사용
-                last = -1
-                # (열 캡이 적용된 범위 내에서만 검사)
-                for i, v in enumerate(row):
-                    sv = (str(v).strip() if v is not None else "")
-                    if sv != "":
-                        last = i
-
-                if last < 0:
-                    continue  # 완전 빈 행은 스킵
-
-                # 🔹 최종 사용할 열 폭 결정
-                width = last + 1
-                if XLSX_MAX_COLS_PER_SHEET and XLSX_MAX_COLS_PER_SHEET > 0:
-                    width = min(width, XLSX_MAX_COLS_PER_SHEET)
-
-                # 🔹 최종 문자열 구성
-                row_vals = []
-                for v in row[:width]:
-                    row_vals.append("" if v is None else str(v).strip())
-
-                acc.append(" | ".join(row_vals))
-                rows += 1
-
-        return "\n".join(acc)
+    def read_txt(self, path: Path) -> str:  # 일반 텍스트 파일 파싱
+        """일반 텍스트 파일 읽기 (다양한 인코딩 지원)"""
+        encodings = ['utf-8-sig', 'utf-8', 'cp949', 'euc-kr', 'latin1']
+        
+        for encoding in encodings:
+            try:
+                with open(path, 'r', encoding=encoding) as f:
+                    content = f.read()
+                    if content.strip():  # 빈 파일이 아니면 성공
+                        return content
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+            except Exception as e:
+                raise ValueError(f"텍스트 파일 로드 실패: {type(e).__name__}: {e}")
+        
+        # 모든 인코딩 실패
+        raise ValueError(f"텍스트 파일 인코딩을 감지할 수 없습니다: {path}")
 
     def load_text(self, file_path: str, verbose: bool = True) -> str:
         """확장자 + 실제 포맷 스니핑으로 적절한 파서 선택"""
@@ -250,13 +327,19 @@ class IngestService:
 
             if ext == ".docx" or (actual == "docx" and ext != ".xlsx"):  # DOCX 파일 파싱
                 if verbose and ext != ".docx" and actual == "docx":
-                    print("  ⚠️ 확장자와 다른 실제 포맷(docx) 감지 → docx 파서 사용")
+                    print(" ⚠️ 확장자와 다른 실제 포맷(docx) 감지 → docx 파서 사용")
                 return self.read_docx(p)
 
             if ext == ".xlsx" or (actual == "xlsx" and ext != ".docx"):  # XLSX 파일 파싱
                 if verbose and ext != ".xlsx" and actual == "xlsx":
                     print("  ⚠️ 확장자와 다른 실제 포맷(xlsx) 감지 → xlsx 파서 사용")
                 return self.read_xlsx(p)
+
+            if ext == ".csv":  # CSV 파일 파싱
+                return self.read_csv(p)
+
+            if ext == ".txt":  # 텍스트 파일 파싱
+                return self.read_txt(p)
 
             # 마지막 보루: 실제 포맷 기준 시도
             if actual == "docx":
@@ -278,7 +361,12 @@ class IngestService:
             return ""
 
     # ========================= Chroma 헬퍼 =========================
-    def get_chroma_collection(self):    # ChromaDB 컬렉션을 가져오거나 생성
+    def get_chroma_collection(self, collection_name: Optional[str] = None):
+        """
+        (수정) 회사 코드별로 컬렉션을 분리하기 위해 collection_name 주입 허용.
+        - collection_name 이 None이면 기존 환경변수 COLLECTION_NAME 사용.
+        """
+        name = collection_name or COLLECTION_NAME
         try:
             # ChromaDB 디렉토리 확인 및 생성
             Path(CHROMA_PATH).mkdir(parents=True, exist_ok=True)
@@ -289,64 +377,92 @@ class IngestService:
                     is_persistent=True,
                 ),
             )
-            return chroma.get_or_create_collection(name=COLLECTION_NAME)
+            return chroma.get_or_create_collection(name=name)
         except Exception as e:
             print(f"ChromaDB 초기화 오류: {str(e)}")
             print("새로운 ChromaDB 인스턴스로 재시도 중...")
             chroma = chromadb.Client()
-            return chroma.get_or_create_collection(name=COLLECTION_NAME)
+            return chroma.get_or_create_collection(name=name)
 
-    # ========================= 단일 파일 처리 =========================
-    def ingest_single_file(self, file_path: str, show_preview: bool = True) -> bool:
-        print(f"📂 입력 파일: {file_path}")
+    # ========================= (신규) 외부 메타 병합 + 컬렉션 지정 =========================
+    def ingest_single_file_with_metadata(
+        self,
+        file_path: str,
+        *,
+        collection_name: str,
+        extra_meta: Dict[str, Any],
+        show_preview: bool = True
+    ) -> Tuple[int, bool]:
+        """
+        (신규) 파일 하나를 인덱싱하면서, 각 청크의 메타데이터에 extra_meta 를 병합하여 저장.
+        - collection_name : 회사 코드(예: 'CAESAR2024') → 회사별 컬렉션 분리
+        - extra_meta      : {'doc_id': int, 'company_id': int, 'user_id': Optional[int], 'is_private': bool}
+        - return          : (chunks_count, success_flag)
+        """
+        print(f"📂 입력 파일: {file_path} (collection={collection_name})")
         try:
-            # 1) 파일 로드
-            raw_text = self.load_text(file_path)
+            # 1) 파일 로드 및 검증
+            raw_text = self.load_text(file_path, verbose=False)
             if not raw_text.strip():
                 print(f"❌ 빈 파일이거나 읽기 실패: {file_path}")
-                return False
+                return 0, False
 
             print(f"✅ 파일 로드 완료, 전체 길이: {len(raw_text):,} chars")
 
             # 2) 텍스트 청킹
             chunks = self.text_splitter.split_text(raw_text)
 
-            # 각 청크의 텍스트 길이 출력
-            for i, c in enumerate(chunks):
-                print(f"  [Chunk {i}] {len(c):,} chars")
+            # 각 청크의 텍스트 길이 출력(옵션)
+            if show_preview:
+                for i, c in enumerate(chunks[:3]):
+                    print(f"  [Chunk {i}] {len(c):,} chars / preview: {c[:100]}...")
 
             print(f"🪓 청킹 완료 → 총 {len(chunks)} chunks")
             if not chunks:
                 print("❌ 청킹 결과가 비어 있습니다.")
-                return False
-
-            # 청크 미리보기
-            if show_preview:
-                for i, c in enumerate(chunks[:3]):
-                    print(f"  [Chunk {i}] {c[:100]}...")
+                return 0, False
 
             # 3) 임베딩 생성
             print("⚙️ 임베딩 생성 중...")
             embeddings = embed_texts_batched(chunks)
             if not embeddings:
                 print("❌ 임베딩 생성 실패(빈 입력).")
-                return False
+                return 0, False
             print(f"✅ 임베딩 완료 → shape: {len(embeddings)} x {len(embeddings[0])}")
 
-            # 4) ChromaDB 저장
-            collection = self.get_chroma_collection()
+            # 4) 회사 코드 컬렉션으로 저장
+            collection = self.get_chroma_collection(collection_name)
 
-            # 기존 동일 파일 청크 삭제(중복 방지)
+            # 📝 기존 동일 문서 청크 삭제(doc_id 기반으로 중복 방지)
             file_name = Path(file_path).name
-            existing = collection.get(where={"source": file_name})
-            if existing and existing.get("ids"):
-                collection.delete(ids=existing["ids"])
-                print(f"🗑 기존 {len(existing['ids'])} 청크 삭제")
+            try:
+                # doc_id가 있으면 해당 문서의 청크만 삭제, 없으면 파일명으로 삭제
+                if extra_meta and "doc_id" in extra_meta:
+                    existing = collection.get(where={"doc_id": extra_meta["doc_id"]})
+                else:
+                    existing = collection.get(where={"source": file_name})
+                
+                if existing and existing.get("ids"):
+                    collection.delete(ids=existing["ids"])
+                    print(f"🗑 기존 {len(existing['ids'])} 청크 삭제")
+            except Exception as e:
+                print(f"⚠️ 기존 청크 삭제 중 오류: {e}")
+                pass
 
             # 새 데이터 추가
             base_id = Path(file_path).stem
             ids = [f"{base_id}-{i}" for i in range(len(chunks))]
-            metadatas = [{"source": file_name, "chunk_idx": i} for i in range(len(chunks))]
+
+            # 기존 메타 유지 + extra_meta 병합
+            metadatas = []
+            for i in range(len(chunks)):
+                m = {
+                    "source": file_name,       # 기존 메타
+                    "chunk_idx": i,            # 기존 메타
+                }
+                if isinstance(extra_meta, dict):
+                    m.update(extra_meta)       # ← 병합: doc_id/company_id/user_id/is_private
+                metadatas.append(m)
 
             collection.add(
                 ids=ids,
@@ -355,172 +471,19 @@ class IngestService:
                 documents=chunks,
             )
 
-            print(f"🎉 완료! {len(chunks)} chunks → Chroma collection '{COLLECTION_NAME}' 저장")
-            return True
-
-        except Exception as e:
-            print(f"❌ 파일 처리 중 오류 발생: {str(e)}")
-            return False
-
-    # ========================= 다중 파일 처리 =========================
-    def get_supported_files(self, folder_path: Path) -> List[Path]:  # 지원되는 파일 목록 추출
-        files: List[Path] = []
-        for file_path in folder_path.iterdir():
-            if file_path.is_file() and file_path.suffix.lower() in self.supported_extensions:
-                files.append(file_path)
-        return sorted(files)    # 정렬된 파일 목록 반환(파일명 순)
-
-    def process_single_file_batch(self, file_path: Path, collection) -> Tuple[int, bool]:  # 단일 파일 처리
-        print(f"\n🔄 처리 중: {file_path.name}")                    #(처리된 청크 수, 성공 여부)
-        try:
-            # 1) 파일 로드
-            raw_text = self.load_text(str(file_path))
-            if not raw_text.strip():
-                print(f"  ⚠️ 빈 파일이거나 읽기 실패: {file_path.name}")
-                return 0, False
-
-            print(f"  ✅ 파일 로드 완료, 전체 길이: {len(raw_text):,} chars")
-
-            # 2) 텍스트 청킹
-            chunks = self.text_splitter.split_text(raw_text)
-
-            # 각 청크의 텍스트 길이 출력
-            for i, c in enumerate(chunks):
-                print(f"  [Chunk {i}] {len(c):,} chars")
-
-            print(f"  🪓 청킹 완료 → 총 {len(chunks)} chunks")
-            if not chunks:
-                print(f"  ⚠️ 청킹 결과가 없음: {file_path.name}")
-                return 0, False
-
-            # 3) 임베딩 생성
-            print(f"  ⚙️ 임베딩 생성 중... ({len(chunks)} chunks)")
-            embeddings = embed_texts_batched(chunks)
-            if not embeddings:
-                print("  ⚠️ 임베딩 생성 실패(빈 입력)")
-                return 0, False
-            print(f"  ✅ 임베딩 완료 → shape: {len(embeddings)} x {len(embeddings[0])}")
-
-            # 4) 기존 청크 삭제(중복 방지)
-            file_name = file_path.name
-            existing = collection.get(where={"source": file_name})
-            if existing and existing.get("ids"):
-                collection.delete(ids=existing["ids"])
-                print(f"  🗑 기존 {len(existing['ids'])} 청크 삭제")
-
-            # 5) 새 데이터 추가
-            base_id = file_path.stem
-            ids = [f"{base_id}-{i}" for i in range(len(chunks))]
-            metadatas = [{"source": file_name, "chunk_idx": i} for i in range(len(chunks))]
-
-            collection.add(
-                ids=ids,
-                metadatas=metadatas,
-                embeddings=embeddings,
-                documents=chunks,
-            )
-
-            print(f"  🎉 저장 완료! {len(chunks)} chunks → ChromaDB")
+            print(f"🎉 완료! {len(chunks)} chunks → Chroma collection '{collection_name}' 저장")
             return len(chunks), True
 
         except Exception as e:
-            print(f"  ❌ 처리 오류 ({file_path.name}): {str(e)}")
+            print(f"❌ 파일 처리 중 오류 발생: {str(e)}")
             return 0, False
 
-    # 폴더 내 모든 지원되는 파일들을 처리하여 ChromaDB에 저장
-    def ingest_multiple_files(self, folder_path: str, clear_collection: bool = False) -> dict:
-        folder = Path(folder_path)  # folder_path (str): 처리할 폴더 경로, clear_collection (bool): 처리 전 컬렉션 전체 삭제 여부 -> dict: 처리 결과 통계(성공/실패 파일 수, 총 청크 수, 소요 시간, 컬렉션 이름)
-        if not folder.exists() or not folder.is_dir():
-            print(f"❌ 폴더가 존재하지 않습니다: {folder_path}")
-            return {"success": False, "error": "폴더가 존재하지 않음"}
+    # 📝 기존 단일 파일 처리 메서드는 더 이상 사용하지 않음 (ingest_single_file_with_metadata 사용)
 
-        print(f"📂 폴더 처리 시작: {folder.absolute()}")
-
-        files_to_process = self.get_supported_files(folder) # 지원되는 파일들 찾기
-        if not files_to_process:
-            print("❌ 처리할 수 있는 파일이 없습니다. (지원 형식: .pdf, .docx, .xlsx)")
-            return {"success": False, "error": "처리할 파일이 없음"}
-
-        print(f"📋 처리 대상 파일 {len(files_to_process)}개:")
-        for i, file_path in enumerate(files_to_process, 1):
-            file_size = file_path.stat().st_size
-            size_mb = file_size / (1024 * 1024)
-            print(f"  {i:2d}. {file_path.name} ({size_mb:.1f}MB)")
-
-        print(f"\n🔧 ChromaDB 초기화 중... (경로: {CHROMA_PATH})")
-        collection = self.get_chroma_collection()
-
-        # 컬렉션 전체 삭제 옵션
-        if clear_collection:
-            try:
-                existing_count = collection.count()
-                if existing_count > 0:
-                    print(f"🗑 기존 컬렉션 데이터 전체 삭제 중... ({existing_count} items)")
-                    all_data = collection.get()
-                    if all_data.get("ids"):
-                        collection.delete(ids=all_data["ids"])
-                    print("✅ 기존 데이터 삭제 완료")
-            except Exception as e:
-                print(f"⚠️ 기존 데이터 삭제 중 오류: {str(e)}")
-
-        # 파일별 처리 통계
-        total_chunks = 0
-        successful_files = 0
-        failed_files = 0
-        start_time = time.time()
-
-        print(f"\n🚀 파일 처리 시작... (총 {len(files_to_process)}개)")
-        print("=" * 60)
-
-        for i, file_path in enumerate(files_to_process, 1):
-            print(f"\n[{i}/{len(files_to_process)}] {file_path.name}")
-
-            chunks_count, success = self.process_single_file_batch(file_path, collection)
-
-            if success:
-                successful_files += 1
-                total_chunks += chunks_count
-            else:
-                failed_files += 1
-
-            progress = (i / len(files_to_process)) * 100    # 진행률 표시
-            print(f"  📊 진행률: {progress:.1f}% ({i}/{len(files_to_process)})")
-
-            if i < len(files_to_process):   # API 호출 제한을 위한 짧은 대기
-                time.sleep(0.5)
-
-        elapsed_time = time.time() - start_time
-
-        result = {
-            "success": True,
-            "successful_files": successful_files,
-            "failed_files": failed_files,
-            "total_chunks": total_chunks,
-            "elapsed_time": elapsed_time,
-            "collection_name": COLLECTION_NAME,
-        }
-
-        print("\n" + "=" * 60)
-        print("🎉 모든 파일 처리 완료!")
-        print("📊 처리 결과:")
-        print(f"  ✅ 성공: {successful_files}개 파일")
-        print(f"  ❌ 실패: {failed_files}개 파일")
-        print(f"  📝 총 청크 수: {total_chunks:,}개")
-        print(f"  ⏱️ 소요 시간: {elapsed_time:.1f}초")
-        print(f"  🗄️ 컬렉션: '{COLLECTION_NAME}'")
-        print("=" * 60)
-
-        return result
+    # 📝 다중 파일 처리 기능은 관리자 업로드에서 사용하지 않으므로 제거
 
 
-# ========================= 편의 함수 =========================
-# 단일 파일 임베딩 편의 함수
-def ingest_single_file(file_path: str, show_preview: bool = True) -> bool:
-    return IngestService().ingest_single_file(file_path, show_preview)
-
-# 다중 파일 임베딩 편의 함수
-def ingest_multiple_files(folder_path: str, clear_collection: bool = False) -> dict:
-    return IngestService().ingest_multiple_files(folder_path, clear_collection)
+# 📝 불필요한 편의 함수 제거 - IngestService 클래스를 직접 사용
 
 
 # ========================= CLI =========================
@@ -531,38 +494,28 @@ def main():
 
     if len(sys.argv) < 2:
         print("사용법:")
-        print("  단일 파일: python ingest_service.py <파일경로>")
-        print("  다중 파일: python ingest_service.py <폴더경로> [--clear]")
-        print("\n옵션:")
-        print("  --clear: 처리 전 기존 컬렉션 데이터 전체 삭제")
+        print("  테스트용 파일 처리: python ingest_service.py <파일경로>")
+        print("\n📝 실제 관리자 업로드는 /api/admin/files/upload 엔드포인트를 사용하세요.")
         print("\n예시:")
-        print("  python ingest_service.py ./rag/inside_data_rag/data/document.pdf")
-        print("  python ingest_service.py ./rag/inside_data_rag/data")
-        print("  python ingest_service.py ./rag/inside_data_rag/data --clear")
+        print("  python ingest_service.py ./storage/data/document.pdf")
         sys.exit(1)
 
     path = sys.argv[1]
-    clear_collection = "--clear" in sys.argv
-
-    if clear_collection:
-        print("⚠️ --clear 옵션이 설정되었습니다. 기존 데이터가 모두 삭제됩니다.")
-        confirm = input("계속하시겠습니까? (y/N): ").strip().lower()
-        if confirm not in ["y", "yes"]:
-            print("❌ 작업이 취소되었습니다.")
-            sys.exit(0)
 
     try:
         path_obj = Path(path)
 
         if path_obj.is_file():  # 단일 파일 처리
             print("📄 단일 파일 모드")
-            success = ingest_single_file(path)
-            sys.exit(0 if success else 1)
-
-        elif path_obj.is_dir():  # 다중 파일 처리
-            print("📂 다중 파일 모드")
-            result = ingest_multiple_files(path, clear_collection)
-            sys.exit(0 if result["success"] else 1)
+            # 📝 개별 파일 테스트용 - 실제 관리자 업로드는 file_ingest_service.py 사용
+            svc = IngestService()
+            success = svc.ingest_single_file_with_metadata(
+                str(path_obj),
+                collection_name=COLLECTION_NAME,
+                extra_meta={},
+                show_preview=True
+            )
+            sys.exit(0 if success[1] else 1)
 
         else:
             print(f"❌ 경로가 존재하지 않습니다: {path}")

@@ -1,23 +1,23 @@
 # app/features/login/company/security.py
-import os, jwt
+import jwt
 from datetime import datetime, timedelta, timezone
+from app.core.config import settings
 
-JWT_SECRET = os.getenv("JWT_SECRET", "change-this-to-32+bytes-secret")
-ACCESS_MIN = int(os.getenv("ACCESS_EXPIRES_MIN", "30"))
-ALGO = "HS256"
+ALGO = settings.ALGORITHM
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 def create_access_token(company_id: int, co_id: str, role: str) -> str:
     iat = _now()
-    exp = iat + timedelta(minutes=ACCESS_MIN)
+    exp = iat + timedelta(minutes=settings.ACCESS_EXPIRES_MIN)
     payload = {
-        "sub": co_id,
-        "companyId": company_id,
-        "role": role,
+        "co_id": co_id,             # 회사 계정ID
+        "companyId": company_id,    # 회사 primary key
+        "role": role,               # 'admin'
         "iat": int(iat.timestamp()),
         "exp": int(exp.timestamp()),
         "typ": "access",
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=ALGO)
+    # ✅ 설정에서 단일화한 secret 사용
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=ALGO)
