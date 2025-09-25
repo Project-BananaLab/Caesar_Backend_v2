@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 # 문서 임베딩 및 ChromaDB 저장 서비스
-# internal_ingest.py
+# app/rag/internal_data_rag/internal_ingest.py
 
 import os
 import sys
 import time
 import zipfile
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any  # ← 추가: Dict, Any
 
 import pdfplumber
 import docx
@@ -250,7 +250,7 @@ class IngestService:
 
             if ext == ".docx" or (actual == "docx" and ext != ".xlsx"):  # DOCX 파일 파싱
                 if verbose and ext != ".docx" and actual == "docx":
-                    print("  ⚠️ 확장자와 다른 실제 포맷(docx) 감지 → docx 파서 사용")
+                    print(" ⚠️ 확장자와 다른 실제 포맷(docx) 감지 → docx 파서 사용")
                 return self.read_docx(p)
 
             if ext == ".xlsx" or (actual == "xlsx" and ext != ".docx"):  # XLSX 파일 파싱
@@ -278,7 +278,12 @@ class IngestService:
             return ""
 
     # ========================= Chroma 헬퍼 =========================
-    def get_chroma_collection(self):    # ChromaDB 컬렉션을 가져오거나 생성
+    def get_chroma_collection(self, collection_name: Optional[str] = None):
+        """
+        (수정) 회사 코드별로 컬렉션을 분리하기 위해 collection_name 주입 허용.
+        - collection_name 이 None이면 기존 환경변수 COLLECTION_NAME 사용.
+        """
+        name = collection_name or COLLECTION_NAME
         try:
             # ChromaDB 디렉토리 확인 및 생성
             Path(CHROMA_PATH).mkdir(parents=True, exist_ok=True)
@@ -289,14 +294,102 @@ class IngestService:
                     is_persistent=True,
                 ),
             )
-            return chroma.get_or_create_collection(name=COLLECTION_NAME)
+            return chroma.get_or_create_collection(name=name)
         except Exception as e:
             print(f"ChromaDB 초기화 오류: {str(e)}")
             print("새로운 ChromaDB 인스턴스로 재시도 중...")
             chroma = chromadb.Client()
-            return chroma.get_or_create_collection(name=COLLECTION_NAME)
+            return chroma.get_or_create_collection(name=name)
 
-    # ========================= 단일 파일 처리 =========================
+    # ========================= (신규) 외부 메타 병합 + 컬렉션 지정 =========================
+    def ingest_single_file_with_metadata(
+        self,
+        file_path: str,
+        *,
+        collection_name: str,
+        extra_meta: Dict[str, Any],
+        show_preview: bool = True
+    ) -> Tuple[int, bool]:
+        """
+        (신규) 파일 하나를 인덱싱하면서, 각 청크의 메타데이터에 extra_meta 를 병합하여 저장.
+        - collection_name : 회사 코드(예: 'CAESAR2024') → 회사별 컬렉션 분리
+        - extra_meta      : {'doc_id': int, 'company_id': int, 'user_id': Optional[int], 'is_private': bool}
+        - return          : (chunks_count, success_flag)
+        """
+        print(f"📂 입력 파일: {file_path} (collection={collection_name})")
+        try:
+            # 1) 파일 로드
+            raw_text = self.load_text(file_path, verbose=False)
+            if not raw_text.strip():
+                print(f"❌ 빈 파일이거나 읽기 실패: {file_path}")
+                return 0, False
+
+            print(f"✅ 파일 로드 완료, 전체 길이: {len(raw_text):,} chars")
+
+            # 2) 텍스트 청킹
+            chunks = self.text_splitter.split_text(raw_text)
+
+            # 각 청크의 텍스트 길이 출력(옵션)
+            if show_preview:
+                for i, c in enumerate(chunks[:3]):
+                    print(f"  [Chunk {i}] {len(c):,} chars / preview: {c[:100]}...")
+
+            print(f"🪓 청킹 완료 → 총 {len(chunks)} chunks")
+            if not chunks:
+                print("❌ 청킹 결과가 비어 있습니다.")
+                return 0, False
+
+            # 3) 임베딩 생성
+            print("⚙️ 임베딩 생성 중...")
+            embeddings = embed_texts_batched(chunks)
+            if not embeddings:
+                print("❌ 임베딩 생성 실패(빈 입력).")
+                return 0, False
+            print(f"✅ 임베딩 완료 → shape: {len(embeddings)} x {len(embeddings[0])}")
+
+            # 4) 회사 코드 컬렉션으로 저장
+            collection = self.get_chroma_collection(collection_name)
+
+            # 기존 동일 파일 청크 삭제(중복 방지)
+            file_name = Path(file_path).name
+            try:
+                existing = collection.get(where={"source": file_name})
+                if existing and existing.get("ids"):
+                    collection.delete(ids=existing["ids"])
+                    print(f"🗑 기존 {len(existing['ids'])} 청크 삭제")
+            except Exception:
+                pass
+
+            # 새 데이터 추가
+            base_id = Path(file_path).stem
+            ids = [f"{base_id}-{i}" for i in range(len(chunks))]
+
+            # 기존 메타 유지 + extra_meta 병합
+            metadatas = []
+            for i in range(len(chunks)):
+                m = {
+                    "source": file_name,       # 기존 메타
+                    "chunk_idx": i,            # 기존 메타
+                }
+                if isinstance(extra_meta, dict):
+                    m.update(extra_meta)       # ← 병합: doc_id/company_id/user_id/is_private
+                metadatas.append(m)
+
+            collection.add(
+                ids=ids,
+                metadatas=metadatas,
+                embeddings=embeddings,
+                documents=chunks,
+            )
+
+            print(f"🎉 완료! {len(chunks)} chunks → Chroma collection '{collection_name}' 저장")
+            return len(chunks), True
+
+        except Exception as e:
+            print(f"❌ 파일 처리 중 오류 발생: {str(e)}")
+            return 0, False
+
+    # ========================= (기존) 단일 파일 처리 =========================
     def ingest_single_file(self, file_path: str, show_preview: bool = True) -> bool:
         print(f"📂 입력 파일: {file_path}")
         try:
@@ -333,7 +426,7 @@ class IngestService:
                 return False
             print(f"✅ 임베딩 완료 → shape: {len(embeddings)} x {len(embeddings[0])}")
 
-            # 4) ChromaDB 저장
+            # 4) ChromaDB 저장 (기본 컬렉션)
             collection = self.get_chroma_collection()
 
             # 기존 동일 파일 청크 삭제(중복 방지)

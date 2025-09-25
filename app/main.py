@@ -15,16 +15,15 @@ from app.utils.db import (
     Base,
     engine,
 )
+from app.core.config import settings
+from dotenv import load_dotenv
+
 from app.agents.routers.agent_router import router as agent_router
 from app.features.login.company.routers import router as company_login_router
-
-# from app.features.admin.routers.files import router as admin_files_router
-from dotenv import load_dotenv
-from app.core.config import settings
+from app.features.admin.routers.files import router as admin_files_router
 from app.features.employee_google.employee import router as employee_router
 from app.features.chat.router.chat import router as chat_router
 from app.features.channel.router.channel import router as channel_router
-
 
 load_dotenv()
 
@@ -40,7 +39,6 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
 ]
 
-
 def add_cors_middleware(app: FastAPI) -> None:
     app.add_middleware(
         CORSMiddleware,
@@ -51,21 +49,18 @@ def add_cors_middleware(app: FastAPI) -> None:
         expose_headers=["*"],
     )
 
-
 add_cors_middleware(app)
-
 
 @app.on_event("startup")
 def on_startup():
     # 서버 시작 시 테이블 생성 (이미 있으면 Skip)
     Base.metadata.create_all(bind=engine)
 
-
 # 라우터 등록
 app.include_router(agent_router)
 app.include_router(employee_router)
 app.include_router(company_login_router)  # 회사 로그인
-# app.include_router(admin_files_router)      # 회사(관리자) 문서 업로드/목록/삭제
+app.include_router(admin_files_router)      # 회사(관리자) 문서 업로드/목록/삭제
 app.include_router(chat_router)
 app.include_router(channel_router)
 
