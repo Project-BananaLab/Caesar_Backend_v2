@@ -1,174 +1,139 @@
-# app/features/chat/chat.py
-"""
-Chat API - 채팅 관련 CRUD 엔드포인트
-"""
-
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional
-from datetime import datetime
-from pydantic import Field
-
-# 새로운 스키마 임포트
+# app/features/chat/router/chat.py
+from fastapi import APIRouter, HTTPException, Depends, status, Query
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.utils.db import get_db
+from app.features.chat.models.chat_models import Chat
+from app.features.channel.models.channel_models import Channel
 from app.features.chat.schemas.chat_schemas import (
     ChatCreate,
-    ChatUpdate,
     ChatResponse,
     ChatListResponse,
-    ChatSearchRequest,
 )
 
-# FastAPI 라우터 생성
 router = APIRouter(prefix="/chats", tags=["Chat"])
 
 
-# 메모리 기반 임시 데이터 저장소 (실제 프로젝트에서는 DB 사용)
-from typing import List
+@router.post("/", response_model=ChatResponse, status_code=status.HTTP_201_CREATED)
+async def create_chat(chat_data: ChatCreate, db: Session = Depends(get_db)):
+    """채널에 메시지 세션 생성 (messages 배열 통째로 저장)"""
+    try:
+        # 채널 존재 확인
+        channel = db.query(Channel).filter(Channel.id == chat_data.channel_id).first()
+        if not channel:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"채널 ID {chat_data.channel_id}를 찾을 수 없습니다.",
+            )
 
-chats_db: List[dict] = []
-chat_id_counter = 1
+        # 메시지 데이터를 dict 형태로 변환
+        messages_dict = [message.dict() for message in chat_data.messages]
 
+        # 새 채팅 생성
+        new_chat = Chat(channel_id=chat_data.channel_id, messages=messages_dict)
 
-@router.post("/", response_model=ChatResponse, status_code=201)
-async def create_chat(chat: ChatCreate):
-    """
-    새로운 채팅 생성
+        db.add(new_chat)
+        db.commit()
+        db.refresh(new_chat)
 
-    Args:
-        chat: 채팅 생성 데이터
+        return ChatResponse.from_orm(new_chat)
 
-    Returns:
-        생성된 채팅 정보
-
-    Raises:
-        HTTPException: 채널이 존재하지 않는 경우 404
-    """
-    global chat_id_counter
-
-    # 여기서는 간단히 구현. 실제로는 channel 존재 여부를 확인해야 함
-    # 임시로 channel_id가 1-100 범위에 있다고 가정
-    if chat.channel_id < 1 or chat.channel_id > 100:
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
         raise HTTPException(
-            status_code=404, detail=f"Channel with id {chat.channel_id} not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"채팅 생성 중 오류가 발생했습니다: {str(e)}",
         )
-
-    # 새 채팅 생성
-    new_chat = {
-        "id": chat_id_counter,
-        "channel_id": chat.channel_id,
-        "user_id": getattr(chat, "user_id", None),  # 옵셔널 필드
-        "message": chat.message,
-        "message_type": getattr(chat, "message_type", "text"),
-        "is_edited": False,
-        "is_deleted": False,
-        "created_at": datetime.now(),
-        "updated_at": None,
-        "channel_name": None,  # JOIN 결과용 (실제 DB에서는 JOIN으로 가져옴)
-        "user_name": None,  # JOIN 결과용
-    }
-
-    chats_db.append(new_chat)
-    chat_id_counter += 1
-
-    return ChatResponse(**new_chat)
-
-
-@router.get("/", response_model=ChatListResponse)
-async def get_all_chats(
-    channel_id: Optional[int] = Query(None, description="필터링할 채널 ID"),
-    limit: int = Query(100, ge=1, le=1000, description="최대 조회 개수"),
-    skip: int = Query(0, ge=0, description="건너뛸 개수"),
-):
-    """
-    모든 채팅 조회 (옵션: 특정 채널의 채팅만 조회)
-
-    Args:
-        channel_id: 필터링할 채널 ID (선택사항)
-        limit: 최대 조회 개수
-        skip: 건너뛸 개수
-
-    Returns:
-        채팅 목록과 총 개수
-    """
-    # 채널 ID로 필터링 (선택사항)
-    filtered_chats = chats_db
-    if channel_id is not None:
-        filtered_chats = [chat for chat in chats_db if chat["channel_id"] == channel_id]
-
-    # 페이징 적용
-    total = len(filtered_chats)
-    paginated_chats = filtered_chats[skip : skip + limit]
-
-    # 응답 생성
-    chat_responses = [ChatResponse(**chat) for chat in paginated_chats]
-
-    # 페이지 정보 계산
-    page = (skip // limit) + 1
-    total_pages = (total + limit - 1) // limit
-
-    return ChatListResponse(
-        chats=chat_responses,
-        total=total,
-        page=page,
-        page_size=limit,
-        total_pages=total_pages,
-    )
 
 
 @router.get("/{chat_id}", response_model=ChatResponse)
-async def get_chat(chat_id: int):
-    """
-    특정 채팅 조회
+async def get_chat(chat_id: int, db: Session = Depends(get_db)):
+    """특정 chat 조회"""
+    try:
+        chat = db.query(Chat).filter(Chat.id == chat_id).first()
 
-    Args:
-        chat_id: 채팅 ID
+        if not chat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"채팅 ID {chat_id}를 찾을 수 없습니다.",
+            )
 
-    Returns:
-        채팅 정보
+        return ChatResponse.from_orm(chat)
 
-    Raises:
-        HTTPException: 채팅이 존재하지 않는 경우 404
-    """
-    for chat in chats_db:
-        if chat["id"] == chat_id:
-            return ChatResponse(**chat)
-
-    raise HTTPException(status_code=404, detail=f"Chat with id {chat_id} not found")
-
-
-@router.delete("/{chat_id}", status_code=204)
-async def delete_chat(chat_id: int):
-    """
-    채팅 삭제
-
-    Args:
-        chat_id: 삭제할 채팅 ID
-
-    Raises:
-        HTTPException: 채팅이 존재하지 않는 경우 404
-    """
-    for i, chat in enumerate(chats_db):
-        if chat["id"] == chat_id:
-            chats_db.pop(i)
-            return
-
-    raise HTTPException(status_code=404, detail=f"Chat with id {chat_id} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"채팅 조회 중 오류가 발생했습니다: {str(e)}",
+        )
 
 
-@router.get("/channel/{channel_id}", response_model=ChatListResponse)
+@router.get("/", response_model=ChatListResponse)
 async def get_chats_by_channel(
-    channel_id: int,
-    limit: int = Query(100, ge=1, le=1000, description="최대 조회 개수"),
-    skip: int = Query(0, ge=0, description="건너뛸 개수"),
+    channel_id: int = Query(..., description="채널 ID (필수)"),
+    db: Session = Depends(get_db),
 ):
-    """
-    특정 채널의 모든 채팅 조회
+    """특정 채널의 모든 chat 조회"""
+    try:
+        # 채널 존재 확인
+        channel = db.query(Channel).filter(Channel.id == channel_id).first()
+        if not channel:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"채널 ID {channel_id}를 찾을 수 없습니다.",
+            )
 
-    Args:
-        channel_id: 채널 ID
-        limit: 최대 조회 개수
-        skip: 건너뛸 개수
+        # 해당 채널의 채팅들 조회
+        chats = (
+            db.query(Chat)
+            .filter(Chat.channel_id == channel_id)
+            .order_by(Chat.created_at.desc())
+            .all()
+        )
 
-    Returns:
-        해당 채널의 채팅 목록
-    """
-    return await get_all_chats(channel_id=channel_id, limit=limit, skip=skip)
+        return ChatListResponse(
+            chats=[ChatResponse.from_orm(chat) for chat in chats],
+            total=len(chats),
+            channel_id=channel_id,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"채팅 조회 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@router.delete("/{chat_id}")
+async def delete_chat(chat_id: int, db: Session = Depends(get_db)):
+    """채팅 삭제"""
+    try:
+        chat = db.query(Chat).filter(Chat.id == chat_id).first()
+
+        if not chat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"채팅 ID {chat_id}를 찾을 수 없습니다.",
+            )
+
+        db.delete(chat)
+        db.commit()
+
+        return {
+            "message": f"채팅 ID {chat_id}가 성공적으로 삭제되었습니다.",
+            "deleted_chat_id": chat_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"채팅 삭제 중 오류가 발생했습니다: {str(e)}",
+        )

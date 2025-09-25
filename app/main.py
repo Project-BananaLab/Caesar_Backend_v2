@@ -1,4 +1,4 @@
-# app/main.py
+# app/main.py uvicorn app.main:app --reload
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +24,10 @@ from app.core.config import settings
 from app.features.employee_google.employee import router as employee_router
 from app.features.chat.router.chat import router as chat_router
 from app.features.channel.router.channel import router as channel_router
+
+# 모델 임포트 (테이블 생성을 위해)
+from app.features.chat.models.chat_models import Chat
+from app.features.channel.models.channel_models import Channel
 
 
 load_dotenv()

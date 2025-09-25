@@ -12,3 +12,7 @@ tmp/
 
 # ChromaDB
 chroma_data/chroma.sqlite3
+
+chroma_data/*
+
+storage/*
