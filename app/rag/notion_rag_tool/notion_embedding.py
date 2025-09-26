@@ -78,7 +78,7 @@ def run_notion_embedding(
         
         # ChromaDB 컬렉션 이름 설정 (회사별로 구분)
         # company_code가 제공되면 code 사용, 없으면 company_id 사용 (하위 호환성)
-        collection_name = f"notion-collection-company-{company_code}"
+        collection_name = f"{company_code}"
 
         # Chroma Cloud 클라이언트 초기화
         update_progress(70, "ChromaDB 연결 중...")
