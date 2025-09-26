@@ -5,15 +5,68 @@ from dotenv import load_dotenv
 from notion_client import Client
 from langchain_community.document_loaders import NotionDBLoader
 from openai import OpenAI
+from app.utils.db import get_notion_token_by_company
+from app.features.auth.company_auth import get_current_company_admin
+from fastapi import Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 load_dotenv()
 
-NOTION_TOKEN = os.getenv("NOTION_TOKEN2")
+# def get_notion_token_by_company(company_id: int) -> str:
+#     """회사 ID로 Notion API 토큰 가져오기"""
+#     db = SessionLocal()
+#     try:
+#         company = db.query(Company).filter(Company.id == company_id).first()
+#         if company and company.co_notion_API:
+#             return decrypt_data(company.co_notion_API, return_type="string")
+#     finally:
+#         db.close()
+
+def update_notion_token(company_id: int):
+    """회사 ID로 NOTION_TOKEN 업데이트"""
+    global NOTION_TOKEN, notion
+    NOTION_TOKEN = get_notion_token_by_company(company_id)
+    notion = Client(auth=NOTION_TOKEN)
+
+def update_notion_token_from_auth(token: HTTPAuthorizationCredentials):
+    """인증 토큰으로부터 자동으로 회사 ID를 가져와서 NOTION_TOKEN 업데이트"""
+    current_company = get_current_company_admin(token)
+    company_id = current_company["company_id"]
+    update_notion_token(company_id)
+
 START_PAGE_ID = (
     "264120560ff680198c0fefbbe17bfc2c"  # 시작 페이지 ID. 나중에 Frontend에서 받아올 것
 )
 
-notion = Client(auth=NOTION_TOKEN)
+# DB에서 Notion API 토큰을 가져와서 초기화하는 함수
+def initialize_notion_with_first_company():
+    """서버 시작 시 첫 번째 회사의 Notion API로 초기화"""
+    global NOTION_TOKEN, notion
+    try:
+        from app.utils.db import SessionLocal
+        from app.features.login.company.models import Company
+        
+        db = SessionLocal()
+        try:
+            # 첫 번째 회사 가져오기 (또는 특정 조건으로 회사 선택)
+            first_company = db.query(Company).filter(Company.co_notion_API.isnot(None)).first()
+            if first_company:
+                NOTION_TOKEN = get_notion_token_by_company(first_company.id)
+                notion = Client(auth=NOTION_TOKEN)
+                print(f"✅ Notion 초기화 완료 - 회사 ID: {first_company.id}")
+                return True
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"⚠️ Notion 초기화 실패: {e}")
+
+# 초기값 설정
+NOTION_TOKEN = None
+notion = None
+
+# 서버 시작 시 자동 초기화
+initialize_notion_with_first_company()
+
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # 전처리된 데이터를 저장할 전역 리스트들
@@ -476,14 +529,18 @@ def get_text_from_block(block: dict) -> str:
 # -------------------------------------------------------------------------------------------------------------------#
 
 
-def process_all_content_recursively(parent_id: str, depth: int = 0):
+def process_all_content_recursively(parent_id: str, depth: int = 0, notion_client=None):
     """
     페이지와 블록의 모든 계층 구조를 재귀적으로 탐색하는 통합 함수
     - parent_id: 페이지 또는 블록의 ID
     - depth: 현재 탐색 깊이 (들여쓰기용)
+    - notion_client: Notion 클라이언트 (선택사항, 없으면 전역 notion 사용)
     """
     indent = "  " * depth
     all_text = ""
+    
+    # notion_client가 제공되지 않으면 전역 notion 사용 (기존 호환성)
+    client = notion_client if notion_client else notion
 
     try:
         # parent_id에 속한 자식 블록들을 가져옴 (페이지 또는 블록) - pagination 처리
@@ -491,7 +548,7 @@ def process_all_content_recursively(parent_id: str, depth: int = 0):
         start_cursor = None
 
         while True:
-            response = notion.blocks.children.list(
+            response = client.blocks.children.list(
                 block_id=parent_id, start_cursor=start_cursor
             )
             blocks.extend(response.get("results", []))
@@ -508,11 +565,11 @@ def process_all_content_recursively(parent_id: str, depth: int = 0):
 
             # 2. 이 블록이 '하위 페이지'인지 확인하고 재귀 호출
             if block["type"] == "child_page":
-                all_text += process_all_content_recursively(block["id"], depth + 1)
+                all_text += process_all_content_recursively(block["id"], depth + 1, notion_client)
 
             # 3. '하위 페이지'가 아니면서 다른 자식 블록(들여쓰기)을 가졌는지 확인하고 재귀 호출
             elif block["has_children"]:
-                all_text += process_all_content_recursively(block["id"], depth + 1)
+                all_text += process_all_content_recursively(block["id"], depth + 1, notion_client)
 
     except Exception as e:
         all_text += f"{indent}🔥 ID({parent_id}) 처리 중 오류 발생: {e}\n"
