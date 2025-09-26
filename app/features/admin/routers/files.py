@@ -103,7 +103,7 @@ def list_docs(
             "isPrivate": d.is_private,
             "employeeId": d.employee_id,
             "status": d.ingest_status,
-            "chunks": d.chunks_count,
+            "size": d.file_size,
             "createdAt": d.created_at,
         }
         for d in q
