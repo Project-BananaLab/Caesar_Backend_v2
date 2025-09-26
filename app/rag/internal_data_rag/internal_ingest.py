@@ -50,6 +50,14 @@ except Exception:
 # OpenAI
 client = OpenAI()
 
+# Chroma Cloud API 키 존재 여부 확인 (Chroma Cloud 사용시)
+if os.getenv("CHROMA_API_KEY") is None:
+    print("경고: CHROMA_API_KEY 환경 변수가 설정되지 않았습니다.")
+if os.getenv("CHROMA_TENANT") is None:
+    print("경고: CHROMA_TENANT 환경 변수가 설정되지 않았습니다.")
+if os.getenv("CHROMA_DATABASE") is None:
+    print("경고: CHROMA_DATABASE 환경 변수가 설정되지 않았습니다.")
+
 
 # ─────────────────────────────────────────────────────────
 # 유틸: 실제 Office Open XML 포맷 스니핑(.docx/.xlsx 구분)
@@ -365,24 +373,52 @@ class IngestService:
         """
         (수정) 회사 코드별로 컬렉션을 분리하기 위해 collection_name 주입 허용.
         - collection_name 이 None이면 기존 환경변수 COLLECTION_NAME 사용.
+        - Chroma Cloud 사용.
         """
         name = collection_name or COLLECTION_NAME
         try:
-            # ChromaDB 디렉토리 확인 및 생성
-            Path(CHROMA_PATH).mkdir(parents=True, exist_ok=True)
-            chroma = chromadb.PersistentClient(
-                path=CHROMA_PATH,
-                settings=Settings(
-                    anonymized_telemetry=False,
-                    is_persistent=True,
-                ),
+        #     # ChromaDB 디렉토리 확인 및 생성 (로컬 사용시)
+        #     Path(CHROMA_PATH).mkdir(parents=True, exist_ok=True)
+        #     chroma = chromadb.PersistentClient(
+        #         path=CHROMA_PATH,
+        #         settings=Settings(
+        #             anonymized_telemetry=False,
+        #             is_persistent=True,
+        #         ),
+        #     )
+        #     return chroma.get_or_create_collection(name=name)
+        # except Exception as e:
+        #     print(f"ChromaDB 초기화 오류: {str(e)}")
+        #     print("새로운 ChromaDB 인스턴스로 재시도 중...")
+        #     chroma = chromadb.Client()
+        #     return chroma.get_or_create_collection(name=name)
+
+            # Chroma Cloud 클라이언트 초기화 (Chroma Cloud 사용시)
+            chroma = chromadb.CloudClient(
+                tenant=os.getenv("CHROMA_TENANT"),
+                database=os.getenv("CHROMA_DATABASE"),
+                api_key=os.getenv("CHROMA_API_KEY")
             )
             return chroma.get_or_create_collection(name=name)
         except Exception as e:
-            print(f"ChromaDB 초기화 오류: {str(e)}")
-            print("새로운 ChromaDB 인스턴스로 재시도 중...")
-            chroma = chromadb.Client()
-            return chroma.get_or_create_collection(name=name)
+            print(f"Chroma Cloud 초기화 오류: {str(e)}")
+            print("로컬 ChromaDB로 폴백...")
+            # 폴백: 로컬 ChromaDB 사용
+            try:
+                Path(CHROMA_PATH).mkdir(parents=True, exist_ok=True)
+                chroma = chromadb.PersistentClient(
+                    path=CHROMA_PATH,
+                    settings=Settings(
+                        anonymized_telemetry=False,
+                        is_persistent=True,
+                    ),
+                )
+                return chroma.get_or_create_collection(name=name)
+            except Exception as e2:
+                print(f"로컬 ChromaDB 초기화도 실패: {str(e2)}")
+                print("인메모리 ChromaDB로 최종 폴백...")
+                chroma = chromadb.Client()
+                return chroma.get_or_create_collection(name=name)
 
     # ========================= (신규) 외부 메타 병합 + 컬렉션 지정 =========================
     def ingest_single_file_with_metadata(
