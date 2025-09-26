@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 import os
 from app.rag.internal_data_rag.internal_retrieve import rag_tools
-from app.rag.notion_rag_tool.notion_rag_tool import notion_rag_search
+from app.rag.notion_rag_tool.notion_rag_tool import create_notion_rag_tool_for_user
 
 # 전역 대화 히스토리 저장소 (사용자별)
 chat_histories: Dict[str, List[Dict[str, str]]] = {}
@@ -151,9 +151,10 @@ def create_agent(user_id: str, openai_api_key: str):
         print(f"❌ 내부 문서 RAG 도구 초기화 실패: {e}")
 
     try:
-        # Notion RAG 도구
-        tools.append(notion_rag_search)
-        print("✅ Notion RAG 도구 로드됨")
+        # 사용자별 Notion RAG 도구
+        notion_rag_tool = create_notion_rag_tool_for_user(user_id)
+        tools.append(notion_rag_tool)
+        print("✅ 사용자별 Notion RAG 도구 로드됨")
     except Exception as e:
         print(f"❌ Notion RAG 도구 초기화 실패: {e}")
 

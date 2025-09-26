@@ -35,24 +35,50 @@ START_PAGE_ID = (
 class NotionRAGService:
     """Notion RAG 서비스 클래스"""
 
-    _instance = None
-    _initialized = False
+    def __init__(self, company_code: str = None):
+        # company_code가 제공되면 사용, 없으면 기본값
+        self.collection_name = company_code if company_code else "notion-collection"
+        self.embeddings = None
+        self.vectorstore = None
+        self.retriever = None
+        self.llm = None
+        self.rag_chain = None
+        self._setup()
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(NotionRAGService, cls).__new__(cls)
-        return cls._instance
+    @classmethod
+    def create_for_company(cls, company_id: int):
+        """회사 ID로 NotionRAGService 인스턴스 생성"""
+        from app.utils.db import get_db
+        from app.features.login.company.models import Company
+        
+        db = next(get_db())
+        try:
+            company = db.query(Company).filter(Company.id == company_id).first()
+            company_code = company.code if company else None
+            return cls(company_code=company_code)
+        finally:
+            db.close()
 
-    def __init__(self):
-        if not self._initialized:
-            self.collection_name = "notion-collection"
-            self.embeddings = None
-            self.vectorstore = None
-            self.retriever = None
-            self.llm = None
-            self.rag_chain = None
-            self._setup()
-            NotionRAGService._initialized = True
+    @classmethod
+    def create_for_user(cls, user_id: str):
+        """사용자 ID(google_user_id)로 NotionRAGService 인스턴스 생성"""
+        from app.utils.db import get_db
+        from app.features.employee_google.models import Employee
+        from app.features.login.company.models import Company
+        
+        db = next(get_db())
+        try:
+            # user_id로 Employee 조회
+            employee = db.query(Employee).filter(Employee.google_user_id == user_id).first()
+            if not employee:
+                return cls()  # 기본 컬렉션 사용
+            
+            # Employee의 company_id로 Company 조회
+            company = db.query(Company).filter(Company.id == employee.company_id).first()
+            company_code = company.code if company else None
+            return cls(company_code=company_code)
+        finally:
+            db.close()
 
     def _setup(self):
         """RAG 시스템 설정"""
@@ -98,18 +124,63 @@ class NotionRAGService:
         #     return f"검색 중 오류가 발생했습니다: {str(e)}"
 
 
-# 전역 서비스 인스턴스
+def create_notion_rag_tool_for_user(user_id: str):
+    """사용자별 Notion RAG 도구 생성 함수"""
+    
+    # 사용자별 NotionRAGService 인스턴스 생성
+    service = NotionRAGService.create_for_user(user_id)
+    
+    @tool
+    def notion_rag_search(query: str) -> str:
+        """
+        Notion 문서에서 정보를 검색하고 질문에 답변합니다.
+
+        이 도구는 사전에 임베딩된 Notion 문서들을 검색하여
+        사용자의 질문과 관련된 정보를 찾아 답변을 생성합니다.
+
+        Args:
+            query (str): 검색하고자 하는 질문이나 키워드
+
+        Returns:
+            str: Notion 문서를 기반으로 한 답변
+        """
+        return service.search(query)
+    
+    return notion_rag_search
+
+def create_notion_rag_tool(company_id: int):
+    """회사별 Notion RAG 도구 생성 함수 (하위 호환성)"""
+    
+    # 회사별 NotionRAGService 인스턴스 생성
+    service = NotionRAGService.create_for_company(company_id)
+    
+    @tool
+    def notion_rag_search(query: str) -> str:
+        """
+        Notion 문서에서 정보를 검색하고 질문에 답변합니다.
+
+        이 도구는 사전에 임베딩된 Notion 문서들을 검색하여
+        사용자의 질문과 관련된 정보를 찾아 답변을 생성합니다.
+
+        Args:
+            query (str): 검색하고자 하는 질문이나 키워드
+
+        Returns:
+            str: Notion 문서를 기반으로 한 답변
+        """
+        return service.search(query)
+    
+    return notion_rag_search
+
+
+# 기본 전역 서비스 (하위 호환성을 위해 유지)
 _notion_rag_service = NotionRAGService()
 
-
-@tool
+@tool  
 def notion_rag_search(query: str) -> str:
     """
-    Notion 문서에서 정보를 검색하고 질문에 답변합니다.
-
-    이 도구는 사전에 임베딩된 Notion 문서들을 검색하여
-    사용자의 질문과 관련된 정보를 찾아 gpt-4o-mini모델을 통해 답변을 생성합니다.
-
+    기본 Notion RAG 검색 (하위 호환성)
+    
     Args:
         query (str): 검색하고자 하는 질문이나 키워드
 
