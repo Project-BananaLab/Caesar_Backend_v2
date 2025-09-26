@@ -16,3 +16,8 @@ class CompanyLoginOut(BaseModel):
     co_name: Optional[str] = Field(default=None, alias="coName")
     role: str
     access_token: str = Field(alias="accessToken")
+
+class NotionApiUpdateIn(BaseModel):
+    # 요청 본문은 { "notionApiKey": "..." } 형태로 받음
+    model_config = ConfigDict(populate_by_name=True)
+    notion_api_key: str = Field(alias="notionApiKey")

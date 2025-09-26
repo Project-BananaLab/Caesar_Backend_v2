@@ -147,3 +147,16 @@ def get_service_token_enhanced(user_id: str, service: str) -> dict:
         
     # print(f"❌ 모든 소스에서 {service} 토큰을 찾을 수 없음")
     # return {}
+
+from app.features.login.company.models import Company
+from app.utils.crypto_utils import decrypt_data
+
+def get_notion_token_by_company(company_id: int) -> str:
+    """회사 ID로 Notion API 토큰 가져오기"""
+    db = SessionLocal()
+    try:
+        company = db.query(Company).filter(Company.id == company_id).first()
+        if company and company.co_notion_API:
+            return decrypt_data(company.co_notion_API, return_type="string")
+    finally:
+        db.close()
