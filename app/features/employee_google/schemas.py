@@ -13,7 +13,8 @@ class EmployeeBase(BaseModel):
 # 새로운 직원을 생성할 때 요청 본문으로 받을 데이터 스키마
 # EmployeeBase의 모든 필드를 상속받습니다.
 class EmployeeCreate(EmployeeBase):
-    pass
+    # 🔹 추가: 프론트에서 입력한 회사코드로 회사 존재/매핑 검증
+    company_code: str
 
 # API 키를 업데이트할 때 요청 본문으로 받을 데이터 스키마
 class APIKeysUpdate(BaseModel):
@@ -35,4 +36,4 @@ class Employee(EmployeeBase):
 
     # 이 설정은 SQLAlchemy 모델 객체를 Pydantic 스키마로 변환할 수 있게 해줍니다.
     class Config:
-        from_attributes = True # 이전 버전의 orm_mode = True 와 동일
+        from_attributes = True  # 이전 버전의 orm_mode = True 와 동일
