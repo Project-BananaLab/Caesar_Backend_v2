@@ -31,15 +31,35 @@ def get_employee_by_google_id(db: Session, google_user_id: str):
     
     return employee
 
-def create_employee(db: Session, employee: schemas.EmployeeCreate):
+def get_employee_by_email(db: Session, email: str):
+    """
+    이메일로 직원을 조회합니다. (중복 가입 방지용)
+    """
+    employee = db.query(models.Employee)\
+        .outerjoin(models.JobDept, models.Employee.job_dept_id == models.JobDept.id)\
+        .outerjoin(models.JobRank, models.Employee.job_rank_id == models.JobRank.id)\
+        .filter(models.Employee.email == email)\
+        .first()
+
+    if employee:
+        employee.dept_name = employee.job_dept.dept_name if employee.job_dept else None
+        employee.rank_name = employee.job_rank.rank_name if employee.job_rank else None
+        employee.has_notion_api = employee.notion_api is not None and len(employee.notion_api) > 0
+        employee.has_slack_api = employee.slack_api is not None and len(employee.slack_api) > 0
+
+    return employee
+
+def create_employee(db: Session, employee: schemas.EmployeeCreate, *, company_id: int):
     """
     새로운 직원을 데이터베이스에 생성합니다.
     :param db: 데이터베이스 세션
     :param employee: 생성할 직원 정보 (Pydantic 스키마)
+    :param company_id: 🔹 회사코드로 조회한 회사 PK (필수)
     :return: 생성된 Employee 모델 객체
     """
     # Pydantic 스키마를 SQLAlchemy 모델 객체로 변환합니다.
     db_employee = models.Employee(
+        company_id=company_id,  # 🔹 회사 매핑 저장
         google_user_id=employee.google_user_id,
         email=employee.email,
         full_name=employee.full_name

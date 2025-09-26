@@ -3,6 +3,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from . import crud, schemas, models
 from app.utils.db import get_db
 from typing import Optional
@@ -14,23 +15,50 @@ router = APIRouter(
     tags=["employees"],  # FastAPI 문서에서 API를 그룹화하는 태그입니다.
 )
 
+# 회사코드 → 회사PK 조회용
+from app.features.login.company.models import Company
+
 
 @router.post("/google-login", response_model=schemas.Employee)
 def google_login(employee: schemas.EmployeeCreate, db: Session = Depends(get_db)):
     """
     구글 소셜 로그인을 처리합니다.
-    - 사용자가 DB에 없으면 새로 생성하고, 있으면 기존 정보를 반환합니다.
-    - 프론트엔드에서 구글 로그인 후 받은 사용자 정보를 이 엔드포인트로 보냅니다.
+     - 사용자가 DB에 없으면 새로 생성하고, 있으면 기존 정보를 반환합니다.
+     - 프론트엔드에서 구글 로그인 후 받은 사용자 정보를 이 엔드포인트로 보냅니다.
+
+    변경:
+     - 최초 가입 시: 회사코드(company_code)로 회사 확인 → 해당 company.id로 Employee 생성
+     - 기존 가입 시: 저장된 employee.company_id 가 company_code가 가리키는 회사와 같을 때만 로그인 허용
     """
-    # Google User ID로 사용자가 이미 존재하는지 확인합니다.
-    db_employee = crud.get_employee_by_google_id(
-        db, google_user_id=employee.google_user_id
-    )
+    # 0) 회사코드 확인 및 회사 조회
+    company_code = (employee.company_code or "").strip()
+    if not company_code:
+        raise HTTPException(status_code=400, detail="회사 코드가 필요합니다.")
+
+    stmt_co = select(Company).where(Company.code == company_code).limit(1)
+    company = db.execute(stmt_co).scalars().first()
+    if not company:
+        raise HTTPException(status_code=400, detail="해당 회사 코드를 찾을 수 없습니다.")
+
+    # 1) Google User ID로 사용자가 이미 존재하는지 확인합니다.
+    db_employee = crud.get_employee_by_google_id(db, google_user_id=employee.google_user_id)
+
+    # 2) (보조) 이메일로도 조회해 중복가입을 방지합니다.
+    if not db_employee:
+        db_employee = crud.get_employee_by_email(db, email=employee.email)
+
     if db_employee:
-        # 사용자가 이미 존재하면 해당 사용자 정보를 반환합니다.
+        # 기존 가입자: 회사 일치 여부 검증
+        if db_employee.company_id != company.id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="회사 코드가 기존 계정의 회사와 일치하지 않습니다."
+            )
+        # 일치하면 기존 정보 반환
         return db_employee
-    # 사용자가 없으면 새로 생성합니다.
-    return crud.create_employee(db=db, employee=employee)
+
+    # 3) 신규 가입: 회사코드로 찾은 회사 PK로 저장
+    return crud.create_employee(db=db, employee=employee, company_id=company.id)
 
 
 @router.get("/me", response_model=schemas.Employee)

@@ -29,7 +29,7 @@ class Employee(Base):
 
     # 각 컬럼을 정의합니다.
     id = Column(Integer, primary_key=True, index=True)  # 기본 키
-    company_id = Column(Integer)
+    company_id = Column(Integer, ForeignKey("company.id"), nullable=False)
     job_dept_id = Column(Integer, ForeignKey("job_dept.id"), nullable=True)
     job_rank_id = Column(Integer, ForeignKey("job_rank.id"), nullable=True)
     # 암호화된 API 키는 바이너리 데이터이므로 LargeBinary 타입을 사용합니다.
