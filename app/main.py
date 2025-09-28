@@ -21,7 +21,8 @@ from dotenv import load_dotenv
 from app.agents.routers.agent_router import router as agent_router
 from app.features.login.company.routers import router as company_login_router
 from app.features.admin.routers.files import router as admin_files_router
-from app.features.employee_google.employee import router as employee_router
+from app.features.login.employee_google.employee import router as employee_router
+from app.features.admin.manage_employee.router import router as manage_employee_router
 from app.features.chat.router.chat import router as chat_router
 from app.features.channel.router.channel import router as channel_router
 
@@ -70,6 +71,7 @@ app.include_router(agent_router)
 app.include_router(employee_router)
 app.include_router(company_login_router)  # 회사 로그인
 app.include_router(admin_files_router)  # 회사(관리자) 문서 업로드/목록/삭제
+app.include_router(manage_employee_router)  # 직원 관리
 app.include_router(chat_router)
 app.include_router(channel_router)
 

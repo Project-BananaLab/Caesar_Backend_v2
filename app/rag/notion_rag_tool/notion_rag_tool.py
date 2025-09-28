@@ -63,7 +63,7 @@ class NotionRAGService:
     def create_for_user(cls, user_id: str):
         """사용자 ID(google_user_id)로 NotionRAGService 인스턴스 생성"""
         from app.utils.db import get_db
-        from app.features.employee_google.models import Employee
+        from app.features.login.employee_google.models import Employee
         from app.features.login.company.models import Company
         
         db = next(get_db())
