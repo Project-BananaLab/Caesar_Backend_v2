@@ -26,12 +26,6 @@ import chromadb
 # .env 파일에서 환경 변수 로드
 load_dotenv()
 
-NOTION_TOKEN = os.getenv("NOTION_TOKEN2")
-START_PAGE_ID = (
-    "264120560ff680198c0fefbbe17bfc2c"  # 시작 페이지 ID. 나중에 Frontend에서 받아올 것
-)
-
-
 class NotionRAGService:
     """Notion RAG 서비스 클래스"""
 

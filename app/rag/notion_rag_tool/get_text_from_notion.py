@@ -1,4 +1,5 @@
 import os
+import sys
 import requests
 import tempfile
 from dotenv import load_dotenv
@@ -34,9 +35,9 @@ def update_notion_token_from_auth(token: HTTPAuthorizationCredentials):
     company_id = current_company["company_id"]
     update_notion_token(company_id)
 
-START_PAGE_ID = (
-    "264120560ff680198c0fefbbe17bfc2c"  # 시작 페이지 ID. 나중에 Frontend에서 받아올 것
-)
+# START_PAGE_ID = (
+#     "264120560ff680198c0fefbbe17bfc2c"  # 시작 페이지 ID. 나중에 Frontend에서 받아올 것
+# )
 
 # DB에서 Notion API 토큰을 가져와서 초기화하는 함수
 def initialize_notion_with_first_company():
@@ -529,6 +530,233 @@ def get_text_from_block(block: dict) -> str:
 # -------------------------------------------------------------------------------------------------------------------#
 
 
+def search_notion_pages(query: str, notion_client=None) -> list:
+    """
+    Notion API search를 사용해서 특정 페이지나 데이터베이스를 검색하는 함수
+    
+    Args:
+        query (str): 검색할 키워드 (페이지 제목, 데이터베이스 이름 등)
+        notion_client: Notion 클라이언트 (선택사항, 없으면 전역 notion 사용)
+    
+    Returns:
+        list: 검색 결과 리스트
+    """
+    client = notion_client if notion_client else notion
+    
+    if not client:
+        raise Exception("Notion 클라이언트가 초기화되지 않았습니다.")
+    
+    try:
+        # Notion API search 호출
+        response = client.search(
+            query=query,
+            sort={
+                "direction": "descending",
+                "timestamp": "last_edited_time"
+            },
+            page_size=100  # 최대 100개 결과
+        )
+        
+        results = response.get("results", [])
+        
+        # 결과를 정리해서 반환
+        formatted_results = []
+        for result in results:
+            result_info = {
+                "id": result["id"],
+                "object": result["object"],  # "page" 또는 "database"
+                "last_edited_time": result["last_edited_time"],
+                "url": result.get("url", "")
+            }
+            
+            # 페이지의 경우
+            if result["object"] == "page":
+                # 제목 추출
+                properties = result.get("properties", {})
+                title = "제목 없음"
+                
+                # title 속성 찾기
+                for prop_name, prop_data in properties.items():
+                    if prop_data.get("type") == "title":
+                        title_parts = prop_data.get("title", [])
+                        if title_parts:
+                            title = title_parts[0].get("plain_text", "제목 없음")
+                        break
+                
+                result_info["title"] = title
+                
+            # 데이터베이스의 경우
+            elif result["object"] == "database":
+                title_parts = result.get("title", [])
+                title = "제목 없음"
+                if title_parts:
+                    title = title_parts[0].get("plain_text", "제목 없음")
+                result_info["title"] = title
+            
+            formatted_results.append(result_info)
+        
+        return formatted_results
+        
+    except Exception as e:
+        print(f"🔥 Notion 검색 중 오류 발생: {e}")
+        return []
+
+
+def get_workspace_root_pages(notion_client=None) -> list:
+    """
+    Notion 워크스페이스의 루트 레벨 페이지들을 가져오는 함수
+    
+    Args:
+        notion_client: Notion 클라이언트 (선택사항, 없으면 전역 notion 사용)
+    
+    Returns:
+        list: 루트 페이지들의 정보 리스트
+    """
+    client = notion_client if notion_client else notion
+    
+    if not client:
+        raise Exception("Notion 클라이언트가 초기화되지 않았습니다.")
+    
+    try:
+        # 빈 쿼리로 검색하면 모든 페이지/데이터베이스를 가져옴
+        response = client.search(
+            query="",
+            sort={
+                "direction": "descending",
+                "timestamp": "last_edited_time"
+            },
+            filter={
+                "property": "object",
+                "value": "page"
+            },
+            page_size=100
+        )
+        
+        results = response.get("results", [])
+        root_pages = []
+        
+        for result in results:
+            # parent가 workspace인 페이지만 선택 (루트 레벨)
+            parent = result.get("parent", {})
+            if parent.get("type") == "workspace":
+                page_info = {
+                    "id": result["id"],
+                    "title": "제목 없음",
+                    "url": result.get("url", ""),
+                    "last_edited_time": result["last_edited_time"]
+                }
+                
+                # 제목 추출
+                properties = result.get("properties", {})
+                for prop_name, prop_data in properties.items():
+                    if prop_data.get("type") == "title":
+                        title_parts = prop_data.get("title", [])
+                        if title_parts:
+                            page_info["title"] = title_parts[0].get("plain_text", "제목 없음")
+                        break
+                
+                root_pages.append(page_info)
+        
+        return root_pages
+        
+    except Exception as e:
+        print(f"🔥 워크스페이스 페이지 조회 중 오류 발생: {e}")
+        return []
+
+
+def find_start_page_by_title(title_keyword: str, notion_client=None) -> str:
+    """
+    페이지 제목으로 START_PAGE_ID를 찾는 함수
+    
+    Args:
+        title_keyword (str): 찾고자 하는 페이지 제목의 키워드
+        notion_client: Notion 클라이언트 (선택사항, 없으면 전역 notion 사용)
+    
+    Returns:
+        str: 찾은 페이지의 ID, 없으면 빈 문자열
+    """
+    search_results = search_notion_pages(title_keyword, notion_client)
+    
+    # 정확히 일치하는 제목 우선 검색
+    for result in search_results:
+        if result["title"].lower() == title_keyword.lower():
+            print(f"✅ 페이지 발견: {result['title']} (ID: {result['id']})")
+            return result["id"]
+    
+    # 부분 일치하는 제목 검색
+    for result in search_results:
+        if title_keyword.lower() in result["title"].lower():
+            print(f"✅ 페이지 발견 (부분일치): {result['title']} (ID: {result['id']})")
+            return result["id"]
+    
+    print(f"⚠️ '{title_keyword}'와 일치하는 페이지를 찾을 수 없습니다.")
+    return ""
+
+
+def get_available_start_pages(notion_client=None) -> list:
+    """
+    시작 페이지로 사용 가능한 페이지들의 목록을 반환하는 함수
+    
+    Args:
+        notion_client: Notion 클라이언트 (선택사항, 없으면 전역 notion 사용)
+    
+    Returns:
+        list: 사용 가능한 페이지들의 정보 리스트 (id, title, url 포함)
+    """
+    # 1. 워크스페이스 루트 페이지들 조회
+    root_pages = get_workspace_root_pages(notion_client)
+    
+    # 2. 모든 페이지 검색 (빈 쿼리)
+    all_pages = search_notion_pages("", notion_client)
+    
+    # 결과를 합치고 중복 제거
+    all_available = {page["id"]: page for page in root_pages + all_pages}
+    
+    # 리스트로 변환하고 제목순 정렬
+    available_pages = list(all_available.values())
+    available_pages.sort(key=lambda x: x["title"])
+    
+    return available_pages
+
+
+def update_start_page_id(new_start_page_id: str):
+    """
+    START_PAGE_ID를 동적으로 업데이트하는 함수
+    
+    Args:
+        new_start_page_id (str): 새로운 시작 페이지 ID
+    """
+    global START_PAGE_ID
+    
+    if not new_start_page_id:
+        raise ValueError("START_PAGE_ID는 빈 문자열일 수 없습니다.")
+    
+    # 페이지가 실제로 존재하는지 확인
+    client = notion if notion else None
+    if client:
+        try:
+            page_info = client.pages.retrieve(page_id=new_start_page_id)
+            properties = page_info.get("properties", {})
+            title = "제목 없음"
+            
+            for prop_name, prop_data in properties.items():
+                if prop_data.get("type") == "title":
+                    title_parts = prop_data.get("title", [])
+                    if title_parts:
+                        title = title_parts[0].get("plain_text", "제목 없음")
+                    break
+            
+            START_PAGE_ID = new_start_page_id
+            print(f"✅ START_PAGE_ID 업데이트 완료: {title} (ID: {START_PAGE_ID})")
+            
+        except Exception as e:
+            raise ValueError(f"유효하지 않은 페이지 ID입니다: {e}")
+    else:
+        # Notion 클라이언트가 없는 경우 그냥 업데이트
+        START_PAGE_ID = new_start_page_id
+        print(f"⚠️ Notion 클라이언트 없음 - START_PAGE_ID 업데이트: {START_PAGE_ID}")
+
+
 def process_all_content_recursively(parent_id: str, depth: int = 0, notion_client=None):
     """
     페이지와 블록의 모든 계층 구조를 재귀적으로 탐색하는 통합 함수
@@ -580,6 +808,20 @@ def process_all_content_recursively(parent_id: str, depth: int = 0, notion_clien
 # --- 스크립트 실행 ---
 if __name__ == "__main__":
     try:
+        print("=== Notion 페이지 탐색 도구 ===")
+        
+        # 1. 사용 가능한 페이지 목록 표시
+        print("\n📋 사용 가능한 시작 페이지들:")
+        available_pages = get_available_start_pages()
+        
+        if available_pages:
+            for i, page in enumerate(available_pages[:10], 1):  # 최대 10개만 표시
+                print(f"{i:2d}. {page['title']} (ID: {page['id'][:8]}...)")
+        
+        # 2. 현재 설정된 START_PAGE_ID로 시작
+        print(f"\n🎯 현재 시작 페이지 ID: {START_PAGE_ID}")
+        
+        # 시작 페이지 정보 가져오기
         start_page_info = notion.pages.retrieve(page_id=START_PAGE_ID)
         start_page_title_parts = start_page_info["properties"]["title"]["title"]
         start_page_title = (
@@ -588,12 +830,25 @@ if __name__ == "__main__":
             else "(제목 없음)"
         )
 
-        print(f"탐색 시작: {start_page_title} (ID: {START_PAGE_ID})\n" + "=" * 40)
+        print(f"✅ 탐색 시작: {start_page_title} (ID: {START_PAGE_ID})\n" + "=" * 40)
+        
+        # 3. 페이지 내용 재귀 탐색
         result = process_all_content_recursively(START_PAGE_ID)
-        # print(result)
-        print("=" * 40 + "\n탐색 완료.")
+        
+        print("=" * 40 + f"\n✅ 탐색 완료: 총 {len(result.splitlines())}줄")
+        
+        # 4. 결과 요약 표시
+        lines = result.splitlines()
+        image_count = len([line for line in lines if "[이미지]" in line or "이미지 분석" in line])
+        table_count = len([line for line in lines if "[표]" in line])
+        database_count = len([line for line in lines if "[데이터베이스" in line])
+        
+        print(f"📊 처리된 콘텐츠:")
+        print(f"   - 이미지: {image_count}개")
+        print(f"   - 표: {table_count}개")
+        print(f"   - 데이터베이스: {database_count}개")
 
-        # 임시 파일로 저장 (확인용)
+        # 5. 임시 파일로 저장 (확인용)
         # import tempfile
         # with tempfile.NamedTemporaryFile(delete=False, suffix='.txt', mode='w', encoding='utf-8') as tmpfile:
         #     tmpfile.write(result)
@@ -601,3 +856,123 @@ if __name__ == "__main__":
 
     except Exception as e:
         print(f"🔥 시작 페이지({START_PAGE_ID})에 접근할 수 없습니다: {e}")
+        print("\n💡 다른 페이지를 시도해보세요:")
+        
+        # 오류 발생 시 대안 제시
+        try:
+            available_pages = get_available_start_pages()
+            if available_pages:
+                print("사용 가능한 페이지 목록:")
+                for page in available_pages[:5]:
+                    print(f"  - {page['title']} (ID: {page['id']})")
+        except:
+            print("사용 가능한 페이지 목록을 가져올 수 없습니다.")
+
+
+# === 사용 예시 함수들 ===
+
+def demo_search_pages():
+    """Notion API 검색 기능 데모"""
+    print("\n=== Notion 페이지 검색 데모 ===")
+    
+    # 키워드로 검색
+    search_keyword = input("검색할 키워드를 입력하세요 (빈 입력 시 모든 페이지): ")
+    results = search_notion_pages(search_keyword)
+    
+    if results:
+        print(f"\n🔍 '{search_keyword}' 검색 결과: {len(results)}개")
+        for i, result in enumerate(results[:5], 1):
+            print(f"{i}. {result['title']} ({result['object']})")
+            print(f"   ID: {result['id']}")
+            print(f"   URL: {result['url']}")
+            print()
+    else:
+        print("검색 결과가 없습니다.")
+
+
+def demo_set_start_page():
+    """START_PAGE_ID 설정 데모"""
+    print("\n=== 시작 페이지 설정 데모 ===")
+    
+    # 사용 가능한 페이지 표시
+    pages = get_available_start_pages()
+    if not pages:
+        print("사용 가능한 페이지가 없습니다.")
+        return
+    
+    print("사용 가능한 페이지:")
+    for i, page in enumerate(pages[:10], 1):
+        print(f"{i:2d}. {page['title']}")
+    
+    try:
+        choice = input("\n페이지 번호를 선택하세요 (1-10, 또는 't'로 제목 검색): ")
+        
+        if choice.lower() == 't':
+            title = input("찾을 페이지 제목을 입력하세요: ")
+            page_id = find_start_page_by_title(title)
+            if page_id:
+                update_start_page_id(page_id)
+        else:
+            idx = int(choice) - 1
+            if 0 <= idx < len(pages):
+                update_start_page_id(pages[idx]['id'])
+            else:
+                print("잘못된 번호입니다.")
+    
+    except (ValueError, IndexError):
+        print("잘못된 입력입니다.")
+
+
+def interactive_mode():
+    """대화형 모드"""
+    print("\n=== Notion API 도구 대화형 모드 ===")
+    
+    while True:
+        print("\n메뉴:")
+        print("1. 페이지 검색")
+        print("2. 시작 페이지 설정")
+        print("3. 현재 설정 확인")
+        print("4. 페이지 탐색 실행")
+        print("5. 종료")
+        
+        choice = input("\n선택하세요 (1-5): ").strip()
+        
+        if choice == '1':
+            demo_search_pages()
+        elif choice == '2':
+            demo_set_start_page()
+        elif choice == '3':
+            print(f"\n현재 START_PAGE_ID: {START_PAGE_ID}")
+            try:
+                page_info = notion.pages.retrieve(page_id=START_PAGE_ID)
+                properties = page_info.get("properties", {})
+                title = "제목 없음"
+                
+                for prop_name, prop_data in properties.items():
+                    if prop_data.get("type") == "title":
+                        title_parts = prop_data.get("title", [])
+                        if title_parts:
+                            title = title_parts[0].get("plain_text", "제목 없음")
+                        break
+                
+                print(f"페이지 제목: {title}")
+            except Exception as e:
+                print(f"페이지 정보를 가져올 수 없습니다: {e}")
+                
+        elif choice == '4':
+            try:
+                print("\n페이지 탐색을 시작합니다...")
+                result = process_all_content_recursively(START_PAGE_ID)
+                print(f"✅ 탐색 완료: 총 {len(result.splitlines())}줄")
+            except Exception as e:
+                print(f"탐색 중 오류: {e}")
+                
+        elif choice == '5':
+            print("프로그램을 종료합니다.")
+            break
+        else:
+            print("잘못된 선택입니다.")
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--interactive":
+    interactive_mode()
