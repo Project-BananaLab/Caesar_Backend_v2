@@ -60,7 +60,7 @@ def get_user_api_tokens_from_db(google_user_id: str) -> dict:
     데이터베이스에서 사용자별 API 토큰을 조회합니다.
     google_user_id로 조회하여 notion_api와 slack_api를 반환합니다.
     """
-    from app.features.employee_google.crud import get_employee_by_google_id
+    from app.features.login.employee_google.crud import get_employee_by_google_id
     from app.utils.crypto_utils import decrypt_data
     
     print(f"🔍 DB에서 토큰 조회 시작 - Google User ID: {google_user_id}")
