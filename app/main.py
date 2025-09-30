@@ -25,6 +25,7 @@ from app.features.login.employee_google.employee import router as employee_route
 from app.features.admin.manage_employee.router import router as manage_employee_router
 from app.features.chat.router.chat import router as chat_router
 from app.features.channel.router.channel import router as channel_router
+from app.features.file_upload.routers.user_files import router as user_files_router
 
 # 모델 임포트 (테이블 생성을 위해)
 from app.features.chat.models.chat_models import Chat
@@ -71,6 +72,7 @@ app.include_router(agent_router)
 app.include_router(employee_router)
 app.include_router(company_login_router)  # 회사 로그인
 app.include_router(admin_files_router)  # 회사(관리자) 문서 업로드/목록/삭제
+app.include_router(user_files_router)  # 개인 파일 업로드/목록/삭제
 app.include_router(manage_employee_router)  # 직원 관리
 app.include_router(chat_router)
 app.include_router(channel_router)

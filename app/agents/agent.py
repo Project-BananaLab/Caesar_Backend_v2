@@ -12,7 +12,7 @@ import app.utils.env_loader as env_loader
 from typing import List, Dict, Any
 from datetime import datetime
 import os
-from app.rag.internal_data_rag.internal_retrieve import rag_tools
+from app.rag.internal_data_rag.user_aware_retrieve import create_user_aware_rag_tools
 from app.rag.notion_rag_tool.notion_rag_tool import create_notion_rag_tool_for_user
 
 # 전역 대화 히스토리 저장소 (사용자별)
@@ -144,9 +144,10 @@ def create_agent(user_id: str, openai_api_key: str):
     print(f"🔧 총 {len(tools)}개 도구로 에이전트 생성")
 
     try:
-        # 내부 RAG 도구
-        tools.extend(rag_tools)
-        print("✅ 내부 문서 RAG 도구 로드됨")
+        # 사용자별 권한을 고려한 내부 RAG 도구
+        user_rag_tools = create_user_aware_rag_tools(user_id)
+        tools.extend(user_rag_tools)
+        print("✅ 사용자별 권한 내부 문서 RAG 도구 로드됨")
     except Exception as e:
         print(f"❌ 내부 문서 RAG 도구 초기화 실패: {e}")
 
