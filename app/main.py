@@ -145,8 +145,8 @@ async def root():
             "auth_needed": not (calendar_token_exists and drive_token_exists),
         },
         "auth_links": {
-            "login": "http://localhost:8080/auth/google/login",
-            "status": "http://localhost:8080/",
+            "login": "http://localhost:8000/auth/google/login",
+            "status": "http://localhost:8000/",
         },
     }
 
@@ -205,7 +205,7 @@ async def google_callback(code: str = None, error: str = None, state: str = None
             "status": "error",
             "error": error,
             "message": f"Google 인증 중 오류가 발생했습니다: {error}",
-            "redirect_to_login": "http://localhost:8080/auth/google/login",
+            "redirect_to_login": "http://localhost:8000/auth/google/login",
         }
 
     # 인증 코드 체크
@@ -213,7 +213,7 @@ async def google_callback(code: str = None, error: str = None, state: str = None
         return {
             "status": "error",
             "message": "인증 코드가 제공되지 않았습니다. Google 인증을 다시 시도해주세요.",
-            "redirect_to_login": "http://localhost:8080/auth/google/login",
+            "redirect_to_login": "http://localhost:8000/auth/google/login",
         }
 
     try:
@@ -454,5 +454,5 @@ async def list_services():
 if __name__ == "__main__":
     import uvicorn
 
-    # redirect_uris와 일치하는 8080 포트에서 실행
+    # redirect_uris와 일치하는 8000 포트에서 실행
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
