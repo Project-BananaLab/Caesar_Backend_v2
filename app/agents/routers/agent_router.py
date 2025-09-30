@@ -4,7 +4,7 @@ Agent 관련 FastAPI 라우터
 simple_test.py의 질문→응답 로직을 API 엔드포인트로 구현
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import os
@@ -58,13 +58,17 @@ class AgentStatsResponse(BaseModel):
 
 
 @router.post("/query", response_model=AgentQueryResponse)
-async def agent_query(request: AgentQueryRequest):
+async def agent_query(request: AgentQueryRequest, http_request: Request):
     """
     Agent에게 질문하고 응답 받기
     simple_test.py의 핵심 기능을 API 엔드포인트로 구현
     """
     try:
         print(f"🔍 Agent 질의 요청: {request.user_id} - {request.query[:50]}...")
+
+        # 쿠키에서 토큰 정보 추출
+        cookies = http_request.cookies
+        print(f"🍪 수신된 쿠키: {list(cookies.keys())[:5]}...")  # 일부만 로그
 
         # OpenAI API 키 검증
         api_key = request.openai_api_key or os.getenv("OPENAI_API_KEY")
@@ -78,10 +82,13 @@ async def agent_query(request: AgentQueryRequest):
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
 
-        # Agent 실행 (기존 run_agent 함수 사용)
+        # Agent 실행 (쿠키 데이터를 포함하여 전달)
         print(f"🤖 Caesar Agent 실행 중... (사용자: {request.user_id})")
         result = run_agent(
-            user_id=request.user_id, openai_api_key=api_key, query=request.query
+            user_id=request.user_id,
+            openai_api_key=api_key,
+            query=request.query,
+            cookies=cookies,
         )
 
         if result["success"]:

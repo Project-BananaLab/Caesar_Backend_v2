@@ -93,7 +93,7 @@ def add_to_chat_history(user_id: str, human_input: str, assistant_output: str):
 agent_store: Dict[str, Any] = {}
 
 
-def create_agent(user_id: str, openai_api_key: str):
+def create_agent(user_id: str, openai_api_key: str, cookies: dict = None):
     """사용자별 LangGraph ReAct Agent 생성"""
 
     # 이미 생성된 에이전트가 있으면 재사용
@@ -107,23 +107,23 @@ def create_agent(user_id: str, openai_api_key: str):
     tools = []
 
     try:
-        # Google Calendar 도구
-        calendar_tools = create_calendar_tools(user_id)
+        # Google Calendar 도구 (쿠키에서 액세스 토큰 사용)
+        calendar_tools = create_calendar_tools(user_id, cookies)
         tools.extend(calendar_tools)
         print(f"✅ Calendar 도구 {len(calendar_tools)}개 로드됨")
     except Exception as e:
         print(f"❌ Calendar 도구 초기화 실패: {e}")
 
     try:
-        # Google Drive 도구
-        drive_tools = create_drive_tools(user_id)
+        # Google Drive 도구 (쿠키에서 액세스 토큰 사용)
+        drive_tools = create_drive_tools(user_id, cookies)
         tools.extend(drive_tools)
         print(f"✅ Drive 도구 {len(drive_tools)}개 로드됨")
     except Exception as e:
         print(f"❌ Drive 도구 초기화 실패: {e}")
 
     try:
-        # Slack 도구
+        # Slack 도구 (DB에서 user_id로 토큰 조회)
         slack_tools = create_slack_tools(user_id)
         tools.extend(slack_tools)
         print(f"✅ Slack 도구 {len(slack_tools)}개 로드됨")
@@ -131,7 +131,7 @@ def create_agent(user_id: str, openai_api_key: str):
         print(f"❌ Slack 도구 초기화 실패: {e}")
 
     try:
-        # Notion 도구
+        # Notion 도구 (DB에서 user_id로 토큰 조회)
         notion_tools = create_notion_tools(user_id)
         tools.extend(notion_tools)
         print(f"✅ Notion 도구 {len(notion_tools)}개 로드됨")
@@ -185,10 +185,10 @@ def create_agent(user_id: str, openai_api_key: str):
     return agent
 
 
-def run_agent(user_id: str, openai_api_key: str, query: str):
+def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = None):
     """LangGraph ReAct Agent 실행"""
     try:
-        agent = create_agent(user_id, openai_api_key)
+        agent = create_agent(user_id, openai_api_key, cookies)
 
         # LangSmith 콜백 설정
         callbacks = []

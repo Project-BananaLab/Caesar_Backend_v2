@@ -9,9 +9,48 @@ from app.features.chat.schemas.chat_schemas import (
     ChatCreate,
     ChatResponse,
     ChatListResponse,
+    ChatUpdate,
 )
+import json
 
 router = APIRouter(prefix="/chats", tags=["Chat"])
+
+
+# only update messages
+@router.put("/{chat_id}", response_model=ChatResponse)
+async def update_chat(
+    chat_id: int, chat_data: ChatUpdate, db: Session = Depends(get_db)
+):
+    """채팅 업데이트 (messages 배열 통째로 저장)"""
+    try:
+        chat = db.query(Chat).filter(Chat.id == chat_id).first()
+        if not chat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"채팅 ID {chat_id}를 찾을 수 없습니다.",
+            )
+        # 기존 메시지 가져오기 (이미 dict 형태로 저장되어 있음)
+        existing_messages = (
+            chat.messages
+            if isinstance(chat.messages, list)
+            else json.loads(chat.messages)
+        )
+
+        # 새 메시지를 dict 형태로 변환
+        new_messages_dict = [message.dict() for message in chat_data.messages]
+
+        # 기존 메시지에 새 메시지 추가
+        updated_messages = existing_messages + new_messages_dict
+        chat.messages = updated_messages
+        db.commit()
+        return ChatResponse.from_orm(chat)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"채팅 메시지 업데이트 중 오류가 발생했습니다: {str(e)}",
+        )
 
 
 @router.post("/", response_model=ChatResponse, status_code=status.HTTP_201_CREATED)
