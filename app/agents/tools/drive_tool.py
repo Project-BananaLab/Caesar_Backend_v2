@@ -2,6 +2,7 @@
 from langchain.tools import Tool
 from googleapiclient.discovery import build
 import json
+from google.oauth2.credentials import Credentials
 
 
 def create_drive_tools(user_id: str, cookies: dict = None):
@@ -9,30 +10,35 @@ def create_drive_tools(user_id: str, cookies: dict = None):
 
     def get_drive_service():
         """Google Drive API 서비스 생성"""
-        from google.oauth2.credentials import Credentials
-
         try:
             # 쿠키에서 Google 액세스 토큰 추출
             if not cookies:
                 raise Exception("쿠키 정보가 없습니다.")
-            
+
             # 쿠키에서 Google 액세스 토큰 찾기 (다양한 키 이름 시도)
             access_token = None
-            possible_keys = ['google_access_token', 'access_token', 'googleAccessToken', 'token']
-            
+            possible_keys = [
+                "google_access_token",
+                "access_token",
+                "googleAccessToken",
+                "token",
+            ]
+
             for key in possible_keys:
                 if key in cookies:
                     access_token = cookies[key]
                     print(f"✅ 쿠키에서 Google 토큰 찾음: {key}")
                     break
-            
+
             if not access_token:
                 available_keys = list(cookies.keys())
-                raise Exception(f"쿠키에서 Google 액세스 토큰을 찾을 수 없습니다. 사용 가능한 키: {available_keys}")
-            
+                raise Exception(
+                    f"쿠키에서 Google 액세스 토큰을 찾을 수 없습니다. 사용 가능한 키: {available_keys}"
+                )
+
             # Google Credentials 객체 생성
             creds = Credentials(token=access_token)
-            
+
             return build("drive", "v3", credentials=creds)
         except Exception as e:
             raise Exception(f"Google Drive 서비스 초기화 실패: {str(e)}")
@@ -68,11 +74,19 @@ def create_drive_tools(user_id: str, cookies: dict = None):
             result = []
             for file in files:
                 name = file.get("name")
-                file_type = file.get("mimeType", "")
-                modified = file.get("modifiedTime", "")
-                result.append(f"- {name} ({file_type}) - 수정일: {modified}")
+                file_type = (
+                    "폴더"
+                    if file.get("mimeType") == "application/vnd.google-apps.folder"
+                    else "파일"
+                )
+                modified = (
+                    file.get("modifiedTime", "")[:10]
+                    if file.get("modifiedTime")
+                    else "알 수 없음"
+                )
+                result.append(f"• {name} ({file_type}) - 수정일: {modified}")
 
-            return "Drive 파일 목록:\n" + "\n".join(result)
+            return f"Drive 파일 목록 ({len(files)}개):\n" + "\n".join(result)
 
         except Exception as e:
             return f"Drive 파일 조회 중 오류: {str(e)}"
@@ -119,6 +133,8 @@ def create_drive_tools(user_id: str, cookies: dict = None):
 
             return f"파일이 {email}에게 {role} 권한으로 공유되었습니다."
 
+        except json.JSONDecodeError:
+            return 'JSON 형식이 올바르지 않습니다. 예: {"file_id": "abc123", "email": "user@example.com", "role": "reader"}'
         except Exception as e:
             return f"파일 공유 중 오류: {str(e)}"
 
@@ -150,6 +166,8 @@ def create_drive_tools(user_id: str, cookies: dict = None):
 
             return f"파일 이름이 변경되었습니다: '{old_name}' -> '{new_name}' (ID: {file_id})"
 
+        except json.JSONDecodeError:
+            return 'JSON 형식이 올바르지 않습니다. 예: {"file_id": "abc123", "new_name": "새파일명.txt"}'
         except Exception as e:
             return f"파일 이름 변경 중 오류: {str(e)}"
 
@@ -213,6 +231,8 @@ def create_drive_tools(user_id: str, cookies: dict = None):
 
             return f"파일이 업로드되었습니다: {file.get('name')} (ID: {file.get('id')})"
 
+        except json.JSONDecodeError:
+            return 'JSON 형식이 올바르지 않습니다. 예: {"name": "test.txt", "content": "파일 내용"}'
         except Exception as e:
             return f"파일 업로드 중 오류: {str(e)}"
 

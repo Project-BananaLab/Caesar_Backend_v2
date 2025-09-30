@@ -25,7 +25,7 @@ def test_api():
             return
     except requests.exceptions.ConnectionError:
         print("❌ 서버에 연결할 수 없습니다.")
-        print("서버를 먼저 실행하세요: uvicorn app.main:app --reload --port 8080")
+        print("서버를 먼저 실행하세요: uvicorn app.main:app --reload --port 8000")
         return
     except Exception as e:
         print(f"❌ 서버 연결 오류: {e}")
