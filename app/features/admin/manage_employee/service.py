@@ -1,4 +1,4 @@
-# service.py
+# app/features/admin/manage_employee/service.py
 # 직원 관리 비즈니스 로직을 처리하는 서비스 계층입니다.
 
 from sqlalchemy.orm import Session
@@ -93,6 +93,9 @@ class EmployeeManagementService:
     def delete_employee(db: Session, employee_id: int, company_id: int) -> bool:
         """
         직원을 삭제합니다.
+        관련된 데이터도 함께 정리합니다:
+        - channels: 해당 직원이 소유한 채널들
+        - docs: 해당 직원의 개인 문서들 (is_private=True)
         
         Args:
             db: 데이터베이스 세션
@@ -106,9 +109,50 @@ class EmployeeManagementService:
         if not employee:
             return False
         
-        db.delete(employee)
-        db.commit()
-        return True
+        try:
+            print(f"🗑️ 직원 연쇄 삭제 시작: {employee.full_name} (ID: {employee_id})")
+            
+            # 1. 해당 직원이 소유한 channels 삭제 (chats도 cascade로 함께 삭제됨)
+            from app.features.channel.models.channel_models import Channel
+            channels = db.query(Channel).filter(Channel.employee_id == employee_id).all()
+            for channel in channels:
+                db.delete(channel)
+            print(f"🗑️ {len(channels)}개 채널 삭제됨")
+            
+            # 2. 해당 직원의 모든 문서 삭제 (개인문서 + 회사문서 중 해당 직원이 업로드한 것)
+            from app.features.admin.models.docs import Doc
+            from app.features.admin.services.file_ingest_service import delete_doc_everywhere
+            
+            # 해당 직원이 업로드한 모든 문서 (개인 + 회사 공개)
+            all_employee_docs = db.query(Doc).filter(
+                Doc.employee_id == employee_id
+            ).all()
+            
+            for doc in all_employee_docs:
+                try:
+                    # 각 문서를 DB/S3/VectorDB에서 완전 삭제
+                    delete_doc_everywhere(db, doc_id=doc.id)
+                except Exception as e:
+                    print(f"❌ 문서 삭제 실패 (doc_id={doc.id}): {e}")
+            
+            print(f"🗑️ {len(all_employee_docs)}개 문서 삭제됨")
+            
+            # 3. 기타 employee_id를 참조하는 데이터 정리
+            # TODO: 향후 추가되는 테이블들도 여기서 정리
+            
+            # 4. 직원 삭제
+            db.delete(employee)
+            db.commit()
+            
+            print(f"✅ 직원 연쇄 삭제 완료: {employee.full_name} (ID: {employee_id})")
+            print(f"   - 채널: {len(channels)}개")
+            print(f"   - 문서: {len(all_employee_docs)}개")
+            return True
+            
+        except Exception as e:
+            db.rollback()
+            print(f"❌ 직원 삭제 중 오류 발생: {e}")
+            raise e
 
     @staticmethod
     def get_all_departments(db: Session) -> List[JobDept]:

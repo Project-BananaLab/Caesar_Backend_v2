@@ -29,7 +29,12 @@ You are Caesar, an intelligent AI assistant that helps users manage their Google
 - Drive tools: list_drive_files, upload_drive_file, etc. 
 - Slack tools: get_slack_messages, send_slack_message, etc.
 - Notion tools: list_notion_content, create_notion_page, etc.
-- Notion RAG: notion_rag_search (검색 기반 문서 조회)
+- Internal document search: internal_rag_search - 업로드된 회사 문서와 개인 문서에서 정보 검색 및 답변
+- Notion document search: notion_rag_search - Notion 워크스페이스 문서 검색 및 답변
+
+🚨 문서 검색 우선순위:
+1. 업로드된 파일 내용 질문 → internal_rag_search 사용
+2. Notion 페이지 내용 질문 → notion_rag_search 사용
 
 Current context:
 - Today: {current_date} ({day_of_week})
@@ -146,11 +151,19 @@ def create_agent(user_id: str, openai_api_key: str, cookies: dict = None):
 
     try:
         # 사용자별 권한을 고려한 내부 RAG 도구
+        print(f"🔧 내부 RAG 도구 로딩 시작 (user_id: {user_id})")
         user_rag_tools = create_user_aware_rag_tools(user_id)
         tools.extend(user_rag_tools)
-        print("✅ 사용자별 권한 내부 문서 RAG 도구 로드됨")
+        print(f"✅ 사용자별 권한 내부 문서 RAG 도구 {len(user_rag_tools)}개 로드됨")
+        
+        # 도구 목록 출력 (디버깅)
+        for tool in user_rag_tools:
+            print(f"   - {tool.name}: {tool.description}")
+            
     except Exception as e:
+        import traceback
         print(f"❌ 내부 문서 RAG 도구 초기화 실패: {e}")
+        print(f"🔍 상세 오류: {traceback.format_exc()}")
 
     try:
         company_id = get_company_id_by_user_id(user_id)
@@ -176,6 +189,12 @@ def create_agent(user_id: str, openai_api_key: str, cookies: dict = None):
     # 메모리 저장소 설정 (대화 히스토리 관리)
     memory = MemorySaver()
 
+    # 최종 도구 목록 확인
+    print(f"🎯 최종 도구 목록 ({len(tools)}개):")
+    for i, tool in enumerate(tools, 1):
+        tool_name = getattr(tool, 'name', str(tool))
+        print(f"   {i}. {tool_name}")
+
     # LangGraph ReAct 에이전트 생성
     agent = create_react_agent(
         model=llm, tools=tools, prompt=system_message, checkpointer=memory
@@ -183,7 +202,8 @@ def create_agent(user_id: str, openai_api_key: str, cookies: dict = None):
 
     # 에이전트 저장
     agent_store[user_id] = agent
-
+    
+    print(f"✅ Agent 생성 완료: {user_id} (총 {len(tools)}개 도구)")
     return agent
 
 

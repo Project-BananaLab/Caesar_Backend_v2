@@ -10,6 +10,10 @@
 import os
 from typing import List, Tuple, Optional
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
+
+# 환경 변수 로드
+load_dotenv()
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_chroma import Chroma
@@ -99,56 +103,83 @@ class UserAwareRAGService:
         try:
             print(f"🔍 권한별 문서 검색: '{query}' (회사: {company_code}, 사용자: {employee_id})")
             
-            # 회사별 컬렉션에서 검색
-            vectorstore = Chroma(
-                collection_name=company_code,
-                embedding_function=self.embeddings,
-                persist_directory=CHROMA_PATH,
+            # 회사별 컬렉션에서 검색 (Chroma Cloud 사용)
+            import chromadb
+            
+            # Chroma Cloud 클라이언트 초기화
+            client = chromadb.CloudClient(
+                tenant=os.getenv("CHROMA_TENANT"),
+                database=os.getenv("CHROMA_DATABASE"),
+                api_key=os.getenv("CHROMA_API_KEY"),
             )
             
-            # 더 많은 결과를 가져와서 권한 필터링 후 top_k 만큼 반환
-            results = vectorstore.similarity_search_with_score(query, k=top_k * 2)
+            vectorstore = Chroma(
+                client=client,
+                collection_name=company_code,
+                embedding_function=self.embeddings,
+            )
+            
+            # 메타데이터 필터로 권한 있는 문서만 검색
+            # Chroma 필터 문법: {"$and": [조건1, 조건2]} 또는 {"$or": [조건1, 조건2]}
+            
+            # 1. 회사 공개 문서 검색 (company_id 일치 AND is_private=False)
+            company_filter = {"$and": [
+                {"company_id": {"$eq": user_context["company_id"]}},
+                {"is_private": {"$eq": False}}
+            ]}
+            
+            # 2. 개인 문서 검색 (company_id 일치 AND is_private=True AND user_id 일치)
+            personal_filter = {"$and": [
+                {"company_id": {"$eq": user_context["company_id"]}},
+                {"is_private": {"$eq": True}},
+                {"user_id": {"$eq": employee_id}}
+            ]}
+            
+            print(f"🔍 회사 공개 문서 검색 필터: {company_filter}")
+            print(f"🔍 개인 문서 검색 필터: {personal_filter}")
+            
+            # 회사 공개 문서 검색
+            company_results = vectorstore.similarity_search_with_score(
+                query, k=top_k, filter=company_filter
+            )
+            print(f"📊 회사 공개 문서: {len(company_results)}개 발견")
+            
+            # 개인 문서 검색  
+            personal_results = vectorstore.similarity_search_with_score(
+                query, k=top_k, filter=personal_filter
+            )
+            print(f"📊 개인 문서: {len(personal_results)}개 발견")
+            
+            # 두 결과 합치고 유사도 순으로 정렬
+            all_results = company_results + personal_results
+            all_results.sort(key=lambda x: x[1])  # distance 기준 오름차순 정렬
+            
+            # top_k 개수만큼만 선택
+            results = all_results[:top_k]
             
             if not results:
                 print("❌ 관련 문서를 찾지 못했습니다.")
                 return []
 
-            # 권한 필터링
-            filtered_contexts = []
-            for doc, distance in results:
-                meta = dict(doc.metadata or {})
-                is_private = meta.get("is_private", False)
-                doc_user_id = meta.get("user_id")  # 문서를 업로드한 사용자 ID (employee_id)
-                doc_company_id = meta.get("company_id")  # 문서가 속한 회사 ID
-                
-                # 권한 체크
-                # 1. 회사 검증: 문서의 company_id와 현재 사용자의 company_id가 같아야 함
-                if doc_company_id != user_context["company_id"]:
-                    print(f"🔒 다른 회사 문서 접근 차단: doc_company={doc_company_id}, user_company={user_context['company_id']}")
-                    continue
-                
-                # 2. 개인 문서 검증: is_private=True인 경우 본인만 접근 가능
-                if is_private:
-                    if doc_user_id != employee_id:
-                        print(f"🔒 개인 문서 접근 차단: doc_user_id={doc_user_id}, current_user={employee_id}")
-                        continue
-                # else: 회사 공개 문서(is_private=False) - 같은 회사면 접근 가능
-                
+            # 메타데이터 필터로 이미 권한 검증된 결과 처리
+            contexts = []
+            print(f"✅ 권한 필터링된 {len(results)}개의 관련 문서를 찾았습니다.")
+            
+            for i, (doc, distance) in enumerate(results, start=1):
                 similarity = _stable_similarity(distance)
+                meta = dict(doc.metadata or {})
                 meta["similarity_score"] = similarity
                 
+                is_private = meta.get("is_private", False)
+                doc_type = "개인 문서" if is_private else "회사 문서"
                 preview = (doc.page_content[:80] + "...") if len(doc.page_content) > 80 else doc.page_content
-                print(f"  ✅ [허용] 유사도={similarity:.4f}, private={is_private}, source={meta.get('source')}")
+                
+                print(f"  [Rank {i}] 유사도={similarity:.4f}, {doc_type}, source={meta.get('source')}")
                 print(f"          내용: {preview}")
                 
-                filtered_contexts.append((doc.page_content, meta))
-                
-                # top_k 개수만큼만 반환
-                if len(filtered_contexts) >= top_k:
-                    break
+                contexts.append((doc.page_content, meta))
             
-            print(f"✅ 권한 필터링 후 {len(filtered_contexts)}개 문서 반환")
-            return filtered_contexts
+            return contexts
             
         except Exception as e:
             print(f"❌ 권한별 문서 검색 중 오류 발생: {e}")
@@ -253,20 +284,41 @@ def create_user_aware_rag_tools(user_id: str) -> list:
     Returns:
         list: 사용자별로 바인딩된 RAG 도구 목록
     """
+    print(f"🔧 사용자별 RAG 도구 생성 중: {user_id}")
+    
     @tool
     def internal_rag_search(query: str) -> str:
         """
-        사용자별 권한을 고려한 내부 문서 검색
-        - 회사 공개 문서: 같은 회사 직원 모두 접근 가능  
-        - 개인 문서: 본인만 접근 가능
+        회사 내부 문서와 개인 문서에서 정보를 검색하고 질문에 답변합니다.
+        
+        이 도구는 업로드된 회사 공개 문서와 사용자의 개인 문서를 검색하여
+        질문과 관련된 정보를 찾아 정확한 답변을 생성합니다.
+        
+        검색 범위:
+        - 회사 공개 문서: 회사 정책, 매뉴얼, 공지사항 등
+        - 개인 문서: 사용자가 업로드한 개인 파일들
+        
+        Args:
+            query (str): 검색하고자 하는 질문이나 키워드
+            
+        Returns:
+            str: 내부 문서를 기반으로 한 답변
         """
-        return _user_aware_rag_service.query_rag_with_permission(
-            query=query, 
-            user_id=user_id,  # 팩토리에서 전달받은 user_id 바인딩
-            top_k=4,
-            show_sources=True
-        )
+        print(f"🔍 internal_rag_search 호출됨: query='{query}', user_id='{user_id}'")
+        try:
+            result = _user_aware_rag_service.query_rag_with_permission(
+                query=query, 
+                user_id=user_id,  # 팩토리에서 전달받은 user_id 바인딩
+                top_k=4,
+                show_sources=True
+            )
+            print(f"✅ RAG 검색 완료: {len(result)}자")
+            return result
+        except Exception as e:
+            print(f"❌ RAG 검색 실패: {e}")
+            return f"내부 문서 검색 중 오류가 발생했습니다: {e}"
     
+    print(f"✅ RAG 도구 생성 완료: {user_id}")
     return [internal_rag_search]
 
 

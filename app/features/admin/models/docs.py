@@ -13,11 +13,11 @@ class Doc(Base):
     업로드된 파일 메타를 보관하고, VectorDB(Chroma) 메타데이터와 매핑하는 테이블.
     """
 
-    # 🆕 추가: UNIQUE 제약 (동일 회사 내 동일 내용(해시) 중복 금지)
+    # 🆕 수정: DB 제약 조건 제거, 애플리케이션 레벨에서 중복 처리
     __table_args__ = (
-        UniqueConstraint("company_id", "checksum_sha256", name="uq_company_checksum"),
-        # 선택: 조회 최적화용 인덱스 (자주 조회한다면 추천)
+        # 조회 최적화용 인덱스만 유지
         Index("ix_docs_company_checksum", "company_id", "checksum_sha256"),
+        Index("ix_docs_user_private", "employee_id", "is_private"),
     )
 
     # PK → VectorDB 메타데이터의 doc_id 로 저장 (1:1 연결)
