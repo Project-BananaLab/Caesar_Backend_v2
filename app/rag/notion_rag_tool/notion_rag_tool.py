@@ -5,15 +5,18 @@ Notion RAG Tool for Agent Core
 Agent Core에서 사용할 수 있도록 만든 도구입니다.
 
 Agent Core 연결 방법:
-1. 이 파일을 agent_core/utils.py나 적절한 위치에 import
-2. tools 리스트에 notion_rag_search 추가
+1. user_id를 통해 company_id를 조회: get_company_id_by_user_id(user_id)
+2. company_id로 도구 생성: create_notion_rag_tool(company_id)
 3. create_react_agent에서 tools 파라미터로 전달
 
 사용 예시:
-    from tmp.notion_RAG.notion_rag_tool import notion_rag_search
+    from app.rag.notion_rag_tool.notion_rag_tool import get_company_id_by_user_id, create_notion_rag_tool
 
-    tools = [notion_rag_search]
-    graph = create_react_agent(model, tools=tools)
+    company_id = get_company_id_by_user_id(user_id)
+    if company_id:
+        notion_tool = create_notion_rag_tool(company_id)
+        tools = [notion_tool]
+        graph = create_react_agent(model, tools=tools)
 """
 
 import os
@@ -53,26 +56,6 @@ class NotionRAGService:
         finally:
             db.close()
 
-    @classmethod
-    def create_for_user(cls, user_id: str):
-        """사용자 ID(google_user_id)로 NotionRAGService 인스턴스 생성"""
-        from app.utils.db import get_db
-        from app.features.login.employee_google.models import Employee
-        from app.features.login.company.models import Company
-        
-        db = next(get_db())
-        try:
-            # user_id로 Employee 조회
-            employee = db.query(Employee).filter(Employee.google_user_id == user_id).first()
-            if not employee:
-                return cls()  # 기본 컬렉션 사용
-            
-            # Employee의 company_id로 Company 조회
-            company = db.query(Company).filter(Company.id == employee.company_id).first()
-            company_code = company.code if company else None
-            return cls(company_code=company_code)
-        finally:
-            db.close()
 
     def _setup(self):
         """RAG 시스템 설정"""
@@ -106,44 +89,49 @@ class NotionRAGService:
 
     def search(self, query: str) -> str:
         """Notion 문서에서 질문에 대한 답변 검색"""
+        
+        if self.retriever is None:
+            return "Notion RAG 시스템이 초기화되지 않았습니다. 환경 변수를 확인해주세요."
 
-        return self.retriever.invoke(query)
-        # if self.rag_chain is None:
-        #     return "Notion RAG 시스템이 초기화되지 않았습니다. 환경 변수를 확인해주세요."
+        try:
+            # retriever로 문서 검색
+            documents = self.retriever.invoke(query)
+            
+            # 검색 결과가 없는 경우
+            if not documents:
+                return "관련된 Notion 문서를 찾을 수 없습니다."
+            
+            # 검색된 문서들의 내용을 결합하여 문자열로 반환
+            result_content = []
+            for i, doc in enumerate(documents[:5]):  # 상위 5개 문서만 사용
+                content = doc.page_content.strip()
+                if content:
+                    result_content.append(f"[문서 {i+1}]\n{content}")
+            
+            if result_content:
+                return "\n\n".join(result_content)
+            else:
+                return "검색된 문서에서 유효한 내용을 찾을 수 없습니다."
+                
+        except Exception as e:
+            return f"검색 중 오류가 발생했습니다: {str(e)}"
 
-        # try:
-        #     return self.rag_chain.invoke(query)
-        #     # return self.retriever.invoke(query)
-        # except Exception as e:
-        #     return f"검색 중 오류가 발생했습니다: {str(e)}"
 
-
-def create_notion_rag_tool_for_user(user_id: str):
-    """사용자별 Notion RAG 도구 생성 함수"""
+def get_company_id_by_user_id(user_id: str) -> int:
+    """사용자 ID로 회사 ID 조회"""
+    from app.utils.db import get_db
+    from app.features.login.employee_google.models import Employee
     
-    # 사용자별 NotionRAGService 인스턴스 생성
-    service = NotionRAGService.create_for_user(user_id)
-    
-    @tool
-    def notion_rag_search(query: str) -> str:
-        """
-        Notion 문서에서 정보를 검색하고 질문에 답변합니다.
-
-        이 도구는 사전에 임베딩된 Notion 문서들을 검색하여
-        사용자의 질문과 관련된 정보를 찾아 답변을 생성합니다.
-
-        Args:
-            query (str): 검색하고자 하는 질문이나 키워드
-
-        Returns:
-            str: Notion 문서를 기반으로 한 답변
-        """
-        return service.search(query)
-    
-    return notion_rag_search
+    db = next(get_db())
+    try:
+        # user_id(google_user_id)로 Employee 조회
+        employee = db.query(Employee).filter(Employee.google_user_id == user_id).first()
+        return employee.company_id if employee else None
+    finally:
+        db.close()
 
 def create_notion_rag_tool(company_id: int):
-    """회사별 Notion RAG 도구 생성 함수 (하위 호환성)"""
+    """회사별 Notion RAG 도구 생성 함수"""
     
     # 회사별 NotionRAGService 인스턴스 생성
     service = NotionRAGService.create_for_company(company_id)

@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 import os
 from app.rag.internal_data_rag.user_aware_retrieve import create_user_aware_rag_tools
-from app.rag.notion_rag_tool.notion_rag_tool import create_notion_rag_tool_for_user
+from app.rag.notion_rag_tool.notion_rag_tool import get_company_id_by_user_id, create_notion_rag_tool
 
 # 전역 대화 히스토리 저장소 (사용자별)
 chat_histories: Dict[str, List[Dict[str, str]]] = {}
@@ -29,6 +29,7 @@ You are Caesar, an intelligent AI assistant that helps users manage their Google
 - Drive tools: list_drive_files, upload_drive_file, etc. 
 - Slack tools: get_slack_messages, send_slack_message, etc.
 - Notion tools: list_notion_content, create_notion_page, etc.
+- Notion RAG: notion_rag_search (검색 기반 문서 조회)
 
 Current context:
 - Today: {current_date} ({day_of_week})
@@ -152,8 +153,9 @@ def create_agent(user_id: str, openai_api_key: str, cookies: dict = None):
         print(f"❌ 내부 문서 RAG 도구 초기화 실패: {e}")
 
     try:
+        company_id = get_company_id_by_user_id(user_id)
         # 사용자별 Notion RAG 도구
-        notion_rag_tool = create_notion_rag_tool_for_user(user_id)
+        notion_rag_tool = create_notion_rag_tool(company_id)
         tools.append(notion_rag_tool)
         print("✅ 사용자별 Notion RAG 도구 로드됨")
     except Exception as e:
