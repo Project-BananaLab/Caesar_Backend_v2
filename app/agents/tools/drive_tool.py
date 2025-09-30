@@ -4,15 +4,35 @@ from googleapiclient.discovery import build
 import json
 
 
-def create_drive_tools(user_id: str):
+def create_drive_tools(user_id: str, cookies: dict = None):
     """Google Drive Tool 생성"""
 
     def get_drive_service():
         """Google Drive API 서비스 생성"""
-        from app.utils.google_auth import get_google_service_credentials
+        from google.oauth2.credentials import Credentials
 
         try:
-            creds = get_google_service_credentials("google_drive", user_id)
+            # 쿠키에서 Google 액세스 토큰 추출
+            if not cookies:
+                raise Exception("쿠키 정보가 없습니다.")
+            
+            # 쿠키에서 Google 액세스 토큰 찾기 (다양한 키 이름 시도)
+            access_token = None
+            possible_keys = ['google_access_token', 'access_token', 'googleAccessToken', 'token']
+            
+            for key in possible_keys:
+                if key in cookies:
+                    access_token = cookies[key]
+                    print(f"✅ 쿠키에서 Google 토큰 찾음: {key}")
+                    break
+            
+            if not access_token:
+                available_keys = list(cookies.keys())
+                raise Exception(f"쿠키에서 Google 액세스 토큰을 찾을 수 없습니다. 사용 가능한 키: {available_keys}")
+            
+            # Google Credentials 객체 생성
+            creds = Credentials(token=access_token)
+            
             return build("drive", "v3", credentials=creds)
         except Exception as e:
             raise Exception(f"Google Drive 서비스 초기화 실패: {str(e)}")

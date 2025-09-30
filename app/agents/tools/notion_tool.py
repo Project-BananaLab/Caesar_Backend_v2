@@ -11,7 +11,7 @@ def create_notion_tools(user_id: str):
     def get_notion_headers():
         """Notion API 헤더 생성"""
         from app.utils.db import get_service_token_enhanced
-        
+
         token_info = get_service_token_enhanced(user_id, "notion")
         print(f"🔍 노션 토큰 정보: {token_info}")
 

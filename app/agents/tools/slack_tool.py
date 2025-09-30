@@ -11,14 +11,18 @@ def create_slack_tools(user_id: str):
     def get_slack_headers():
         """Slack API 헤더 생성"""
         from app.utils.db import get_service_token_enhanced
-        
+
         token_info = get_service_token_enhanced(user_id, "slack")
         if not token_info:
-            raise Exception("Slack 토큰이 없습니다. 직원 DB에 SLACK_API를 설정하거나 .env 파일에 SLACK_USER_TOKEN을 설정해주세요.")
+            raise Exception(
+                "Slack 토큰이 없습니다. 직원 DB에 SLACK_API를 설정하거나 .env 파일에 SLACK_USER_TOKEN을 설정해주세요."
+            )
 
         user_token = token_info.get("user_token")
         if not user_token:
-            raise Exception("Slack User 토큰이 없습니다. 직원 DB에 SLACK_API를 설정하거나 .env 파일에 SLACK_USER_TOKEN을 설정해주세요.")
+            raise Exception(
+                "Slack User 토큰이 없습니다. 직원 DB에 SLACK_API를 설정하거나 .env 파일에 SLACK_USER_TOKEN을 설정해주세요."
+            )
 
         return {
             "Authorization": f"Bearer {user_token}",

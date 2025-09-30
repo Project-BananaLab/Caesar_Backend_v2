@@ -30,6 +30,8 @@ def parse_natural_event_input(query: str):
         r"(오전|오후|AM|PM)\s*(\d{1,2})[시:]?\s+(.+)",
     ]
 
+    matched = False
+
     for i, pattern in enumerate(patterns):
         match = re.search(pattern, query)
         if match:
@@ -91,6 +93,21 @@ def parse_natural_event_input(query: str):
 
             break
 
+    # 2. 정규식에서 시간 못 찾았을 때 → 자연어 키워드 처리
+    if not start_input:
+        time_keywords = {
+            "아침": ("09:00", "10:00"),
+            "점심": ("12:00", "13:00"),
+            "저녁": ("19:00", "20:00"),
+            "밤": ("21:00", "22:00"),
+        }
+
+        for keyword, (start, end) in time_keywords.items():
+            if keyword in query:
+                title = query.replace(keyword, "").strip() or "새 일정"
+                start_input, end_input = start, end
+                break
+
     # 패턴 매칭이 안된 경우 전체를 제목으로
     if not start_input:
         title = query.strip()
@@ -102,6 +119,11 @@ def parse_natural_event_input(query: str):
 def parse_event_times(start_input: str, end_input: str):
     """시간 입력을 Google Calendar API 형식으로 변환"""
     try:
+
+        # 이미 dict로 넘어온 경우 그대로 반환
+        if isinstance(start_input, dict) and isinstance(end_input, dict):
+            return start_input, end_input
+
         now = datetime.now()
         today = now.date()
 
@@ -195,15 +217,42 @@ def parse_natural_update_input(query: str):
     return {"title": query.strip(), "summary": "", "event_id": None}
 
 
-def create_calendar_tools(user_id: str):
+def create_calendar_tools(user_id: str, cookies: dict = None):
     """Google Calendar Tool 생성"""
 
     def get_calendar_service():
         """Google Calendar API 서비스 생성"""
-        from app.utils.google_auth import get_google_service_credentials
+        from google.oauth2.credentials import Credentials
 
         try:
-            creds = get_google_service_credentials("google", user_id)
+            # 쿠키에서 Google 액세스 토큰 추출
+            if not cookies:
+                raise Exception("쿠키 정보가 없습니다.")
+
+            # 쿠키에서 Google 액세스 토큰 찾기 (다양한 키 이름 시도)
+            access_token = None
+            possible_keys = [
+                "google_access_token",
+                "access_token",
+                "googleAccessToken",
+                "token",
+            ]
+
+            for key in possible_keys:
+                if key in cookies:
+                    access_token = cookies[key]
+                    print(f"✅ 쿠키에서 Google 토큰 찾음: {key}")
+                    break
+
+            if not access_token:
+                available_keys = list(cookies.keys())
+                raise Exception(
+                    f"쿠키에서 Google 액세스 토큰을 찾을 수 없습니다. 사용 가능한 키: {available_keys}"
+                )
+
+            # Google Credentials 객체 생성
+            creds = Credentials(token=access_token)
+
             return build("calendar", "v3", credentials=creds)
         except Exception as e:
             raise Exception(f"Google Calendar 서비스 초기화 실패: {str(e)}")

@@ -33,13 +33,19 @@ class AgentManager:
         self._initialized = True
         print("✅ AgentManager 싱글턴 인스턴스 초기화됨")
 
-    def get_agent(self, user_id: str, openai_api_key: Optional[str] = None):
+    def get_agent(
+        self,
+        user_id: str,
+        openai_api_key: Optional[str] = None,
+        cookies: Optional[dict] = None,
+    ):
         """
         사용자별 Agent 인스턴스를 가져오거나 생성
 
         Args:
             user_id: 사용자 ID
             openai_api_key: OpenAI API 키 (선택사항)
+            cookies: 에이전트에 전달할 쿠키 데이터
 
         Returns:
             Agent 인스턴스
@@ -61,9 +67,9 @@ class AgentManager:
             return self.agents[user_id]
 
         try:
-            # 새 Agent 생성
+            # 새 Agent 생성 (쿠키 데이터를 포함하여 전달)
             print(f"🔧 새 Agent 생성 중: {user_id}")
-            agent = create_agent(user_id, api_key)
+            agent = create_agent(user_id, api_key, cookies)
 
             # 캐시에 저장
             self.agents[user_id] = agent
@@ -121,10 +127,12 @@ def get_agent_manager() -> AgentManager:
 
 
 # 편의 함수들
-def get_user_agent(user_id: str, openai_api_key: Optional[str] = None):
+def get_user_agent(
+    user_id: str, openai_api_key: Optional[str] = None, cookies: Optional[dict] = None
+):
     """사용자 Agent 가져오기 (편의 함수)"""
     manager = get_agent_manager()
-    return manager.get_agent(user_id, openai_api_key)
+    return manager.get_agent(user_id, openai_api_key, cookies)
 
 
 def remove_user_agent(user_id: str):
