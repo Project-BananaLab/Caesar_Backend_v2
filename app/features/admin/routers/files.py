@@ -80,7 +80,7 @@ def list_docs(
 ):
     """
     관리자용 문서 목록
-    - 관리자 회사 범위 내 문서만 조회
+    - 관리자 회사의 공개 문서만 조회 (개인 문서 제외)
     """
     company_id = admin.get("company_id") or admin.get("companyId")
     if not company_id:
@@ -88,7 +88,10 @@ def list_docs(
 
     q = (
         db.query(Doc)
-        .filter(Doc.company_id == int(company_id))
+        .filter(
+            Doc.company_id == int(company_id),
+            Doc.is_private == False  # 회사 공개 문서만 조회
+        )
         .order_by(Doc.created_at.desc())
         .offset(offset)
         .limit(limit)
@@ -118,7 +121,7 @@ def delete_doc(
 ):
     """
     관리자 문서 삭제 (S3/VectorDB/DB 동시 삭제)
-    - 본인 회사 문서만 삭제 가능
+    - 본인 회사의 공개 문서만 삭제 가능 (개인 문서 삭제 불가)
     """
     company_id = admin.get("company_id") or admin.get("companyId")
     if not company_id:
@@ -126,7 +129,11 @@ def delete_doc(
 
     d = (
         db.query(Doc)
-        .filter(Doc.id == doc_id, Doc.company_id == int(company_id))
+        .filter(
+            Doc.id == doc_id, 
+            Doc.company_id == int(company_id),
+            Doc.is_private == False  # 회사 공개 문서만 삭제 가능
+        )
         .first()
     )
     if not d:
