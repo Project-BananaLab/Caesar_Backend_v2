@@ -40,10 +40,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
+ALLOWED_ORIGINS_1 = os.getenv("ALLOWED_ORIGINS_1")
+ALLOWED_ORIGINS_2 = os.getenv("ALLOWED_ORIGINS_2")
+
 # ✅ 개발환경: 프론트 도메인만 명시 (와일드카드 X)
 ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    ALLOWED_ORIGINS_1,
+    ALLOWED_ORIGINS_2,
 ]
 
 

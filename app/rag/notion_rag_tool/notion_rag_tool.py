@@ -77,8 +77,12 @@ class NotionRAGService:
                 collection_name=self.collection_name,
             )
 
-            # 리트리버 생성
-            self.retriever = self.vectorstore.as_retriever()
+            # 리트리버 생성 (source="notion" 메타데이터 필터 적용)
+            self.retriever = self.vectorstore.as_retriever(
+                search_kwargs={
+                    "filter": {"source": "notion"}
+                }
+            )
 
             # gpt-4o-mini 모델 초기화
             self.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0)
@@ -90,12 +94,16 @@ class NotionRAGService:
     def search(self, query: str) -> str:
         """Notion 문서에서 질문에 대한 답변 검색"""
         
-        if self.retriever is None:
+        if self.vectorstore is None:
             return "Notion RAG 시스템이 초기화되지 않았습니다. 환경 변수를 확인해주세요."
 
         try:
-            # retriever로 문서 검색
-            documents = self.retriever.invoke(query)
+            # vectorstore에서 직접 검색하여 source="notion" 필터 적용
+            documents = self.vectorstore.similarity_search(
+                query=query,
+                k=5,  # 상위 5개 문서 검색
+                filter={"source": "notion"}  # notion 소스만 필터링
+            )
             
             # 검색 결과가 없는 경우
             if not documents:
@@ -103,8 +111,16 @@ class NotionRAGService:
             
             # 검색된 문서들의 내용을 결합하여 문자열로 반환
             result_content = []
-            for i, doc in enumerate(documents[:5]):  # 상위 5개 문서만 사용
+            print(f"✅ {len(documents)}개의 Notion 문서를 찾았습니다.")
+            
+            for i, doc in enumerate(documents):  # 모든 검색된 문서 사용
                 content = doc.page_content.strip()
+                metadata = doc.metadata or {}
+                
+                # 메타데이터 정보 로그 출력 (디버깅용)
+                print(f"  [문서 {i+1}] source: {metadata.get('source', 'unknown')}, "
+                      f"company_id: {metadata.get('company_id', 'unknown')}")
+                
                 if content:
                     result_content.append(f"[문서 {i+1}]\n{content}")
             
