@@ -211,6 +211,7 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
     """LangGraph ReAct Agent 실행"""
     try:
         agent = create_agent(user_id, openai_api_key, cookies)
+        rag_results = []
 
         # LangSmith 콜백 설정
         callbacks = []
@@ -255,7 +256,6 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
 
         # 중간 단계 및 RAG 결과 추출
         intermediate_steps = []
-        rag_results = []
 
         if result and "messages" in result:
             for msg in result["messages"]:
@@ -319,11 +319,41 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
                     for tool_call in msg.tool_calls:
                         intermediate_steps.append(f"도구 호출: {tool_call['name']}")
 
+        sources = []
+        for r in rag_results:
+            # 파일 기반 RAG
+            if (
+                r.get("source") == "internal_rag_search"
+                or r.get("source_type") == "file"
+            ):
+                filename = r.get("filename") or "unknown_file"
+                sources.append(
+                    {
+                        "source_type": "file",
+                        "filename": filename,
+                        "preview_url": f"/static/previews/{filename}",
+                        "download_url": f"/files/{filename}",
+                    }
+                )
+            # 노션 기반 RAG
+            elif (
+                r.get("source") == "notion_rag_search"
+                or r.get("source_type") == "notion"
+            ):
+                sources.append(
+                    {
+                        "source_type": "notion",
+                        "title": r.get("title") or "Notion 문서",
+                        "url": r.get("url") or "",
+                    }
+                )
+
         return {
             "success": True,
             "output": output,
             "intermediate_steps": intermediate_steps,
             "rag_results": rag_results,
+            "sources": sources,
             "chat_history": chat_histories.get(user_id, []),
         }
 
