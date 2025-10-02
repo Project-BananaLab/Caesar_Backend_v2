@@ -289,20 +289,28 @@ def create_user_aware_rag_tools(user_id: str) -> list:
     @tool
     def internal_rag_search(query: str) -> str:
         """
-        회사 내부 문서와 개인 문서에서 정보를 검색하고 질문에 답변합니다.
+        Search and answer questions from uploaded files (PDF, DOCX, XLSX, etc.).
         
-        이 도구는 업로드된 회사 공개 문서와 사용자의 개인 문서를 검색하여
-        질문과 관련된 정보를 찾아 정확한 답변을 생성합니다.
+        🎯 This tool ONLY searches content from uploaded files:
+        - PDF documents (regulations, manuals, reports, etc.)
+        - Word documents (policies, guidelines, contracts, etc.)  
+        - Excel files (data, forms, status reports, etc.)
+        - Other uploaded document files
         
-        검색 범위:
-        - 회사 공개 문서: 회사 정책, 매뉴얼, 공지사항 등
-        - 개인 문서: 사용자가 업로드한 개인 파일들
+        Search scope:
+        - Company public documents: Company policies, manuals, announcements, forms, etc.
+        - Personal uploaded documents: Files personally uploaded by the user
+        
+        Use when:
+        - File-based questions like "production status writing methods", "employee regulations", "manuals"
+        - Specific content or procedure inquiries from uploaded documents
+        - Questions about forms, templates, formats
         
         Args:
-            query (str): 검색하고자 하는 질문이나 키워드
+            query (str): Question or keyword to search in uploaded documents
             
         Returns:
-            str: 내부 문서를 기반으로 한 답변
+            str: Answer based on uploaded documents
         """
         print(f"🔍 internal_rag_search 호출됨: query='{query}', user_id='{user_id}'")
         try:
