@@ -1,6 +1,6 @@
 # app/features/chat/schemas/chat_schemas.py
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 
@@ -9,6 +9,7 @@ class Message(BaseModel):
 
     role: str = Field(..., description="메시지 역할 (user, agent, assistant)")
     content: str = Field(..., min_length=1, description="메시지 내용")
+    previewFile: Optional[Dict[str, Any]] = Field(None, description="파일 프리뷰 정보")
 
 
 class ChatBase(BaseModel):

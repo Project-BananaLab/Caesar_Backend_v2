@@ -13,7 +13,10 @@ from typing import List, Dict, Any
 from datetime import datetime
 import os
 from app.rag.internal_data_rag.user_aware_retrieve import create_user_aware_rag_tools
-from app.rag.notion_rag_tool.notion_rag_tool import get_company_id_by_user_id, create_notion_rag_tool
+from app.rag.notion_rag_tool.notion_rag_tool import (
+    get_company_id_by_user_id,
+    create_notion_rag_tool,
+)
 
 # 전역 대화 히스토리 저장소 (사용자별)
 chat_histories: Dict[str, List[Dict[str, str]]] = {}
@@ -155,13 +158,14 @@ def create_agent(user_id: str, openai_api_key: str, cookies: dict = None):
         user_rag_tools = create_user_aware_rag_tools(user_id)
         tools.extend(user_rag_tools)
         print(f"✅ 사용자별 권한 내부 문서 RAG 도구 {len(user_rag_tools)}개 로드됨")
-        
+
         # 도구 목록 출력 (디버깅)
         for tool in user_rag_tools:
             print(f"   - {tool.name}: {tool.description}")
-            
+
     except Exception as e:
         import traceback
+
         print(f"❌ 내부 문서 RAG 도구 초기화 실패: {e}")
         print(f"🔍 상세 오류: {traceback.format_exc()}")
 
@@ -192,7 +196,7 @@ def create_agent(user_id: str, openai_api_key: str, cookies: dict = None):
     # 최종 도구 목록 확인
     print(f"🎯 최종 도구 목록 ({len(tools)}개):")
     for i, tool in enumerate(tools, 1):
-        tool_name = getattr(tool, 'name', str(tool))
+        tool_name = getattr(tool, "name", str(tool))
         print(f"   {i}. {tool_name}")
 
     # LangGraph ReAct 에이전트 생성
@@ -202,7 +206,7 @@ def create_agent(user_id: str, openai_api_key: str, cookies: dict = None):
 
     # 에이전트 저장
     agent_store[user_id] = agent
-    
+
     print(f"✅ Agent 생성 완료: {user_id} (총 {len(tools)}개 도구)")
     return agent
 
@@ -256,13 +260,65 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
 
         # 중간 단계 및 RAG 결과 추출
         intermediate_steps = []
+        drive_files = []  # 구글 드라이브 파일 정보 저장
 
         if result and "messages" in result:
             for msg in result["messages"]:
                 if hasattr(msg, "type") and msg.type == "tool":
                     intermediate_steps.append(f"도구 사용: {msg.name}")
+
+                    # 구글 드라이브 도구 응답 처리
+                    if hasattr(msg, "content") and msg.name == "list_drive_files":
+                        try:
+                            print(
+                                f"🔍 구글 드라이브 도구 응답: {str(msg.content)[:500]}..."
+                            )
+
+                            # 다운로드 링크 추출
+                            import re
+
+                            content = str(msg.content)
+
+                            # 먼저 간단한 패턴으로 시도
+                            simple_pattern = r"• ([^(]+) \(파일\)"
+                            simple_matches = re.findall(simple_pattern, content)
+                            print(f"🔍 간단한 패턴으로 찾은 파일: {simple_matches}")
+
+                            # 파일 정보 패턴 매칭 (이모지 제외하고 더 안전한 패턴 사용)
+                            file_pattern = r"• ([^(]+) \(파일\) - 수정일: ([^\n]+)\n  .+ 다운로드: ([^\n]+)\n  .+ 미리보기: ([^\n]+)"
+                            matches = re.findall(file_pattern, content, re.UNICODE)
+
+                            print(f"🔍 정규식 매칭 결과: {len(matches)}개")
+
+                            for i, match in enumerate(matches):
+                                try:
+                                    file_name = match[0].strip()
+                                    modified_time = match[1].strip()
+                                    download_link = match[2].strip()
+                                    view_link = match[3].strip()
+
+                                    drive_files.append(
+                                        {
+                                            "name": file_name,
+                                            "modifiedTime": modified_time,
+                                            "webContentLink": download_link,
+                                            "webViewLink": view_link,
+                                        }
+                                    )
+                                    print(f"✅ 파일 {i+1} 처리 완료: {file_name}")
+                                except Exception as match_error:
+                                    print(f"❌ 파일 {i+1} 처리 실패: {match_error}")
+
+                            print(f"✅ 구글 드라이브 파일 {len(drive_files)}개 추출됨")
+
+                        except Exception as e:
+                            import traceback
+
+                            print(f"❌ 구글 드라이브 파일 정보 추출 실패: {e}")
+                            print(f"❌ 상세 오류: {traceback.format_exc()}")
+
                     # RAG 도구의 응답에서 결과 추출
-                    if hasattr(msg, "content") and msg.name in [
+                    elif hasattr(msg, "content") and msg.name in [
                         "notion_rag_search",
                         "internal_rag_search",
                     ]:
@@ -320,13 +376,100 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
                         intermediate_steps.append(f"도구 호출: {tool_call['name']}")
 
         sources = []
-        for r in rag_results:
-            # 파일 기반 RAG
-            if (
-                r.get("source") == "internal_rag_search"
-                or r.get("source_type") == "file"
-            ):
-                filename = r.get("filename") or "unknown_file"
+
+        # RAG 결과에서 파일 정보 추출 및 S3 URL 생성
+        def extract_file_sources_from_rag():
+            """RAG 결과에서 파일 소스 정보 추출"""
+            file_sources = []
+
+            for r in rag_results:
+                if r.get("source") == "internal_rag_search":
+                    # RAG 검색 결과에서 메타데이터 추출
+                    content = r.get("content", "")
+
+                    # 내용에서 파일 정보 파싱 - 실제 RAG 응답 형태에 맞춤
+                    if "📋 참고한 문서:" in content:
+                        lines = content.split("\n")
+                        for line in lines:
+                            if line.startswith("- ") and "청크" in line:
+                                # "- 연차규정.pdf (개인 문서, 청크 0)" 형태에서 파일명 추출
+                                # 또는 "- filename.pdf (청크 0)" 형태
+                                line_content = line.replace("- ", "").strip()
+
+                                # 파일명 추출 (괄호 앞까지)
+                                if "(" in line_content:
+                                    filename = line_content.split("(")[0].strip()
+                                else:
+                                    filename = line_content.strip()
+
+                                if filename and filename != "알 수 없음":
+                                    print(f"🔍 RAG에서 파일명 추출: {filename}")
+                                    file_sources.append(
+                                        {
+                                            "source_type": "file",
+                                            "filename": filename,
+                                            "s3_url": None,  # S3 URL은 DB에서 조회 필요
+                                        }
+                                    )
+
+            return file_sources
+
+        # DB에서 파일 정보 조회하여 S3 URL 가져오기
+        def get_s3_url_from_db(filename: str) -> str:
+            """파일명으로 DB에서 S3 URL 조회"""
+            try:
+                from app.utils.db import get_db
+                from app.features.admin.models.docs import Doc
+
+                db = next(get_db())
+                print(f"🔍 DB에서 파일 검색 중: {filename}")
+                doc = db.query(Doc).filter(Doc.file_name == filename).first()
+
+                if doc:
+                    print(f"✅ 파일 찾음: {doc.file_name}, URL: {doc.file_url}")
+                    db.close()
+                    return {"file_url": doc.file_url, "doc_id": doc.id}
+                else:
+                    print(f"❌ 파일을 찾을 수 없음: {filename}")
+                    # 모든 파일명 출력해서 확인
+                    all_docs = db.query(Doc.file_name).all()
+                    print(
+                        f"📋 DB에 있는 모든 파일: {[d.file_name for d in all_docs[:5]]}"
+                    )
+                    db.close()
+                    return None
+            except Exception as e:
+                print(f"❌ DB에서 파일 URL 조회 실패: {e}")
+                return None
+
+        # 파일 소스 추출 및 S3 URL 조회
+        file_sources = extract_file_sources_from_rag()
+        print(f"🔍 추출된 파일 소스 수: {len(file_sources)}")
+
+        # 중복 제거
+        unique_filenames = list(set([f["filename"] for f in file_sources]))
+        print(f"🔍 중복 제거 후 파일 수: {len(unique_filenames)}")
+
+        for filename in unique_filenames:
+            file_info = get_s3_url_from_db(filename)
+
+            if file_info and isinstance(file_info, dict):
+                print(f"✅ Sources에 추가: {filename} -> {file_info['file_url']}")
+                sources.append(
+                    {
+                        "source_type": "file",
+                        "filename": filename,
+                        "s3_url": file_info["file_url"],
+                        "doc_id": file_info["doc_id"],
+                        "preview_url": file_info[
+                            "file_url"
+                        ],  # S3 URL을 직접 프리뷰로 사용
+                        "download_url": f"/download/{file_info['doc_id']}",  # 다운로드 전용 엔드포인트 사용
+                    }
+                )
+            else:
+                # S3 URL이 없으면 기존 방식 사용
+                print(f"⚠️ 파일 정보 없음, 기본 방식 사용: {filename}")
                 sources.append(
                     {
                         "source_type": "file",
@@ -335,8 +478,10 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
                         "download_url": f"/files/{filename}",
                     }
                 )
-            # 노션 기반 RAG
-            elif (
+
+        # 노션 기반 RAG 처리
+        for r in rag_results:
+            if (
                 r.get("source") == "notion_rag_search"
                 or r.get("source_type") == "notion"
             ):
@@ -348,12 +493,15 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
                     }
                 )
 
+        print(f"🎯 최종 Sources 배열: {sources}")
+
         return {
             "success": True,
             "output": output,
             "intermediate_steps": intermediate_steps,
             "rag_results": rag_results,
             "sources": sources,
+            "drive_files": drive_files,  # 구글 드라이브 파일 정보 추가
             "chat_history": chat_histories.get(user_id, []),
         }
 

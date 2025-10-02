@@ -61,7 +61,7 @@ def create_drive_tools(user_id: str, cookies: dict = None):
                 .list(
                     q=search_query,
                     pageSize=10,
-                    fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
+                    fields="nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink, webContentLink)",
                 )
                 .execute()
             )
@@ -72,19 +72,43 @@ def create_drive_tools(user_id: str, cookies: dict = None):
                 return "파일을 찾을 수 없습니다."
 
             result = []
-            for file in files:
-                name = file.get("name")
-                file_type = (
-                    "폴더"
-                    if file.get("mimeType") == "application/vnd.google-apps.folder"
-                    else "파일"
-                )
-                modified = (
-                    file.get("modifiedTime", "")[:10]
-                    if file.get("modifiedTime")
-                    else "알 수 없음"
-                )
-                result.append(f"• {name} ({file_type}) - 수정일: {modified}")
+            for i, file in enumerate(files):
+                try:
+                    name = file.get("name", "알 수 없는 파일")
+                    file_id = file.get("id", "")
+                    file_type = (
+                        "폴더"
+                        if file.get("mimeType") == "application/vnd.google-apps.folder"
+                        else "파일"
+                    )
+                    modified = (
+                        file.get("modifiedTime", "")[:10]
+                        if file.get("modifiedTime")
+                        else "알 수 없음"
+                    )
+
+                    # 다운로드 링크 생성 (폴더가 아닌 경우에만)
+                    if file_type == "파일" and file_id:
+                        # Google Drive 다운로드 링크 생성
+                        download_link = (
+                            f"https://drive.google.com/uc?export=download&id={file_id}"
+                        )
+                        view_link = file.get("webViewLink", "")
+
+                        result.append(
+                            f"• {name} ({file_type}) - 수정일: {modified}\n"
+                            f"  📥 다운로드: {download_link}\n"
+                            f"  👁️ 미리보기: {view_link}"
+                        )
+                        print(f"✅ 파일 {i+1} 처리 완료: {name}")
+                    else:
+                        result.append(f"• {name} ({file_type}) - 수정일: {modified}")
+                        print(f"✅ 폴더 {i+1} 처리 완료: {name}")
+
+                except Exception as file_error:
+                    print(f"❌ 파일 {i+1} 처리 중 오류: {file_error}")
+                    # 오류가 발생해도 계속 진행
+                    continue
 
             return f"Drive 파일 목록 ({len(files)}개):\n" + "\n".join(result)
 
