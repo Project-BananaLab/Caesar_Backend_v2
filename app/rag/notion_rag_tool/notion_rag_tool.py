@@ -155,16 +155,20 @@ def create_notion_rag_tool(company_id: int):
     @tool
     def notion_rag_search(query: str) -> str:
         """
-        Notion 문서에서 정보를 검색하고 질문에 답변합니다.
-
-        이 도구는 사전에 임베딩된 Notion 문서들을 검색하여
-        사용자의 질문과 관련된 정보를 찾아 답변을 생성합니다.
-
+        Search information from Notion workspace pages and databases.
+        
+        ⚠️ This tool ONLY searches content from Notion platform pages, databases, and blocks.
+        
+        Use when:
+        - Questions about Notion page content
+        - Notion database information queries
+        - Searching documents or notes written in Notion
+        
         Args:
-            query (str): 검색하고자 하는 질문이나 키워드
+            query (str): Question or keyword to search in Notion
 
         Returns:
-            str: Notion 문서를 기반으로 한 답변
+            str: Answer based on Notion workspace documents
         """
         return service.search(query)
     
@@ -177,13 +181,13 @@ _notion_rag_service = NotionRAGService()
 @tool  
 def notion_rag_search(query: str) -> str:
     """
-    기본 Notion RAG 검색 (하위 호환성)
+    Default Notion RAG search (for backward compatibility)
     
     Args:
-        query (str): 검색하고자 하는 질문이나 키워드
+        query (str): Question or keyword to search
 
     Returns:
-        str: Notion 문서를 기반으로 한 답변
+        str: Answer based on Notion documents
     """
     return _notion_rag_service.search(query)
 

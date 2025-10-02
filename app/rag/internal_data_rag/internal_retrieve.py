@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-RAG 문서 검색 & 답변 서비스 (LangChain + Chroma)
-- 권장사항 반영 버전
+RAG 문서 검색 & 답변 서비스 (LangChain + Chroma Cloud)
+- 권장사항 반영 + CloudClient 사용 버전
 
 변경 핵심
-1) 컨텍스트 길이 제한(MAX_CONTEXT_CHARS) 추가로 프롬프트 초과 방지
-2) 안정 유사도 변환: similarity = 1 / (1 + distance) (코사인 거리 가정)
-3) 헬스체크 시 private 속성 접근 제거 → 실제 검색 시도로 체크
-4) Document 임포트 경로 최신화 (langchain_core.documents)
-5) CHROMA_PATH 절대 경로화(로그 표시) + 환경변수 통일
+1) Chroma Cloud 사용: chromadb.CloudClient(...) 후 Chroma(client=_cloud)로 초기화
+2) 컨텍스트 길이 제한(MAX_CONTEXT_CHARS)로 프롬프트 초과 방지
+3) 안정 유사도 변환: similarity = 1 / (1 + distance) (코사인 거리 가정)
+4) 헬스체크 시 실제 검색 시도로 체크
+5) Document 임포트 경로 최신화 (langchain_core.documents)
 6) 모델 오버라이드 지원(메서드 인자 model)
 7) 컨텍스트 트렁케이션 시 유사도 순 정렬 후 누적 바이트 컷
 8) 로그 메시지 개선
@@ -27,6 +27,9 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.tools import tool
 from langchain_core.documents import Document  # ✅ 최신 경로
 
+# Chroma Cloud
+import chromadb
+
 # ─────────────────────────────────────────────────────────
 # 환경 변수 로드
 # ─────────────────────────────────────────────────────────
@@ -35,12 +38,23 @@ load_dotenv()
 # ─────────────────────────────────────────────────────────
 # 환경 변수
 # ─────────────────────────────────────────────────────────
+# 경로(로그 표시에만 사용; Cloud에서는 persist_directory 미사용)
 CHROMA_PATH = os.getenv("CHROMA_PATH", "./chroma_data")
-CHROMA_PATH = os.path.abspath(CHROMA_PATH)  # ✅ 절대 경로화 (로그 가시성)
+CHROMA_PATH = os.path.abspath(CHROMA_PATH)
+
+# Chroma Cloud 자격/스코프
+CHROMA_TENANT = os.getenv("CHROMA_TENANT")
+CHROMA_DATABASE = os.getenv("CHROMA_DATABASE")
+CHROMA_API_KEY = os.getenv("CHROMA_API_KEY")
+
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "inside_data")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")  # ✅ 운영 기본값 권장
 MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "12000"))  # ✅ 프롬프트 길이 제한
+
+if not (CHROMA_TENANT and CHROMA_DATABASE and CHROMA_API_KEY):
+    print("⚠️  Chroma Cloud 자격 정보가 일부 없습니다. (CHROMA_TENANT / CHROMA_DATABASE / CHROMA_API_KEY)")
+    print("    이 상태로 실행 시 초기화에서 오류가 발생할 수 있습니다.\n")
 
 # ─────────────────────────────────────────────────────────
 # LangChain 컴포넌트 초기화
@@ -48,13 +62,17 @@ MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "12000"))  # ✅ 프롬�
 # 임베딩 함수 (OpenAI Embeddings 래퍼)
 _embeddings = OpenAIEmbeddings(model=EMBED_MODEL)
 
-# 벡터스토어 (Chroma 래퍼)
-# - persist_directory: CHROMA_PATH
-# - collection_name: COLLECTION_NAME
+# ✅ 벡터스토어: Chroma Cloud 사용
+_cloud = chromadb.CloudClient(
+    tenant=CHROMA_TENANT,
+    database=CHROMA_DATABASE,
+    api_key=CHROMA_API_KEY,
+)
+
 _vectorstore = Chroma(
     collection_name=COLLECTION_NAME,
     embedding_function=_embeddings,
-    persist_directory=CHROMA_PATH,
+    client=_cloud,  # ✅ Cloud 사용 (persist_directory 미사용)
 )
 
 # LLM (ChatOpenAI 래퍼)
@@ -113,22 +131,31 @@ def _truncate_context_blocks(blocks: List[Tuple[str, dict]], max_chars: int) -> 
     sep = "\n\n---\n\n"
 
     for doc, meta in sorted_blocks:
-        header = f"[출처: {meta.get('source', '알 수 없음')} / 청크: {meta.get('chunk_idx', 'N/A')}]\n"
+        src = meta.get("source", "알 수 없음")
+        sheet = meta.get("sheet")
+        page = meta.get("page")
+        chunk = meta.get("chunk_idx", "N/A")
+        header = f"[출처: {src}"
+        if sheet:
+            header += f" / 시트: {sheet}"
+        if page:
+            header += f" / 페이지: {page}"
+        header += f" / 청크: {chunk}]"
+        header += "\n"
+
         block = header + doc
         add_len = len(block) + (len(sep) if acc else 0)
         if total + add_len > max_chars:
             break
         if acc:
-            acc.append(sep)
-            total += len(sep)
-        acc.append(block)
-        total += len(block)
+            acc.append(sep); total += len(sep)
+        acc.append(block); total += len(block)
 
     return "".join(acc)
 
 
 class RetrieveService:
-    """문서 검색 및 답변 생성을 담당하는 서비스 (LangChain 버전, 권장사항 반영)"""
+    """문서 검색 및 답변 생성을 담당하는 서비스 (LangChain + Chroma Cloud)"""
 
     def __init__(self):
         self.vectorstore = _vectorstore
@@ -163,7 +190,7 @@ class RetrieveService:
                 preview = (doc.page_content[:80] + "...") if len(doc.page_content) > 80 else doc.page_content
                 print(
                     f"  [Rank {i}] 유사도={similarity:.4f}, "
-                    f"source={meta.get('source')}, chunk={meta.get('chunk_idx')}"
+                    f"source={meta.get('source')}, sheet={meta.get('sheet')}, page={meta.get('page')}, chunk={meta.get('chunk_idx')}"
                 )
                 print(f"          내용: {preview}")
                 contexts.append((doc.page_content, meta))
@@ -217,7 +244,12 @@ class RetrieveService:
         if show_sources:
             sources = []
             for _, meta in contexts:
-                src = f"- {meta.get('source', '알 수 없음')} (청크 {meta.get('chunk_idx', 'N/A')})"
+                src = f"- {meta.get('source', '알 수 없음')}"
+                if meta.get("sheet"):
+                    src += f" / 시트 {meta.get('sheet')}"
+                if meta.get("page"):
+                    src += f" / 페이지 {meta.get('page')}"
+                src += f" (청크 {meta.get('chunk_idx', 'N/A')})"
                 if src not in sources:
                     sources.append(src)
             return f"{answer}\n\n📋 참고한 문서:\n" + "\n".join(sources)
@@ -250,9 +282,29 @@ _retrieve_service = RetrieveService()
 @tool
 def rag_search_tool(query: str) -> str:
     """
-    내부 문서에서 정보를 검색하고 답변을 생성하는 RAG 도구입니다.
-    사내 문서, 정책, 절차, 가이드라인 등에 대한 질문에 답변합니다.
-    """
+        Search and answer questions from uploaded files (PDF, DOCX, XLSX, etc.).
+        
+        🎯 This tool ONLY searches content from uploaded files:
+        - PDF documents (regulations, manuals, reports, etc.)
+        - Word documents (policies, guidelines, contracts, etc.)  
+        - Excel files (data, forms, status reports, etc.)
+        - Other uploaded document files
+        
+        Search scope:
+        - Company public documents: Company policies, manuals, announcements, forms, etc.
+        - Personal uploaded documents: Files personally uploaded by the user
+        
+        Use when:
+        - File-based questions like "production status writing methods", "employee regulations", "manuals"
+        - Specific content or procedure inquiries from uploaded documents
+        - Questions about forms, templates, formats
+        
+        Args:
+            query (str): Question or keyword to search in uploaded documents
+            
+        Returns:
+            str: Answer based on uploaded documents
+        """
     print(f"\n📚 RAG 도구 실행: '{query}'")
     return _retrieve_service.query_rag(query, top_k=3)
 
@@ -277,28 +329,30 @@ def query_rag(query: str, top_k: int = 4, model: str | None = None) -> str:
 # ========================= CLI =========================
 
 def _healthcheck_vectorstore() -> bool:
-    """✅ private 속성 접근 없이 헬스체크: 더미 검색 시도"""
+    """✅ Cloud 컬렉션과 연결 확인: 더미 검색 시도"""
     try:
         _ = _vectorstore.similarity_search("__healthcheck__", k=1)
         return True
     except Exception as e:
-        print(f"❌ Chroma 헬스체크 실패: {e}")
+        print(f"❌ Chroma Cloud 헬스체크 실패: {e}")
         return False
 
 
 def main():
     print("=" * 80)
-    print("🔍 문서 검색 및 답변 생성 서비스 (LangChain 권장사항 반영)")
+    print("🔍 문서 검색 및 답변 생성 서비스 (LangChain + Chroma Cloud)")
     print("=" * 80)
 
-    print(f"📁 CHROMA_PATH: {CHROMA_PATH}")
-    print(f"🗄️ COLLECTION_NAME: {COLLECTION_NAME}")
+    print(f"📁 CHROMA_PATH(로그용): {CHROMA_PATH}")
+    print(f"🏷️  COLLECTION_NAME: {COLLECTION_NAME}")
     print(f"🔤 EMBED_MODEL: {EMBED_MODEL}")
     print(f"🧠 CHAT_MODEL: {CHAT_MODEL}")
     print(f"🧻 MAX_CONTEXT_CHARS: {MAX_CONTEXT_CHARS}")
+    print(f"☁️  CHROMA_TENANT: {CHROMA_TENANT}")
+    print(f"☁️  CHROMA_DATABASE: {CHROMA_DATABASE}")
 
     if not _healthcheck_vectorstore():
-        print("먼저 ingest 파이프라인으로 문서를 적재하세요.")
+        print("먼저 ingest 파이프라인으로 Cloud 컬렉션에 문서를 적재했는지, 또는 Cloud 자격이 올바른지 확인하세요.")
         return
 
     RetrieveService().interactive_mode()
