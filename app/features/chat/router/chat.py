@@ -38,9 +38,11 @@ async def update_chat(
 
         # 새 메시지를 dict 형태로 변환
         new_messages_dict = [message.dict() for message in chat_data.messages]
+        print(f"💾 업데이트할 새 메시지: {new_messages_dict}")
 
         # 기존 메시지에 새 메시지 추가
         updated_messages = existing_messages + new_messages_dict
+        print(f"💾 최종 업데이트된 메시지: {updated_messages}")
         chat.messages = updated_messages
         db.commit()
         return ChatResponse.from_orm(chat)
@@ -67,6 +69,7 @@ async def create_chat(chat_data: ChatCreate, db: Session = Depends(get_db)):
 
         # 메시지 데이터를 dict 형태로 변환
         messages_dict = [message.dict() for message in chat_data.messages]
+        print(f"💾 저장할 메시지 데이터: {messages_dict}")
 
         # 새 채팅 생성
         new_chat = Chat(channel_id=chat_data.channel_id, messages=messages_dict)
@@ -132,6 +135,15 @@ async def get_chats_by_channel(
             .order_by(Chat.created_at.desc())
             .all()
         )
+
+        # 불러온 채팅 메시지에 previewFile 정보가 있는지 확인
+        for chat in chats:
+            for msg in chat.messages:
+                if isinstance(msg, dict) and msg.get("previewFile"):
+                    print(
+                        f"📂 불러온 메시지에 previewFile 있음: {msg.get('previewFile')}"
+                    )
+                    break
 
         return ChatListResponse(
             chats=[ChatResponse.from_orm(chat) for chat in chats],

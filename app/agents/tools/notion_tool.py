@@ -165,7 +165,9 @@ def create_notion_tools(user_id: str):
                 page_data = json.loads(query)
                 title = page_data.get("title", "새 페이지")
                 content = page_data.get("content", "")
-                parent_id = page_data.get("parent_id")
+                parent_id = page_data.get("parent_id") or page_data.get(
+                    "parent_page_id"
+                )
             except (json.JSONDecodeError, TypeError):
                 # JSON이 아니면 제목으로 처리
                 title = query.strip() if query.strip() else "새 페이지"

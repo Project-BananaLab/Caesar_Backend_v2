@@ -40,6 +40,9 @@ class AgentQueryResponse(BaseModel):
     sources: Optional[List[Dict[str, Any]]] = Field(
         default=[], description="추출된 문서 소스 정보"
     )
+    drive_files: Optional[List[Dict[str, Any]]] = Field(
+        default=[], description="구글 드라이브 파일 정보"
+    )
     total_conversations: int = Field(..., description="총 대화 수")
     cost_info: Optional[Dict[str, Any]] = Field(None, description="비용 정보")
 
@@ -98,14 +101,35 @@ async def agent_query(request: AgentQueryRequest, http_request: Request):
             # 성공 응답
             chat_history = result.get("chat_history", [])
 
+            # 안전한 데이터 추출
+            try:
+                drive_files = result.get("drive_files", [])
+                if not isinstance(drive_files, list):
+                    print(f"⚠️ drive_files가 리스트가 아님: {type(drive_files)}")
+                    drive_files = []
+
+                sources = result.get("sources", [])
+                if not isinstance(sources, list):
+                    print(f"⚠️ sources가 리스트가 아님: {type(sources)}")
+                    sources = []
+
+                print(f"✅ drive_files 안전 처리 완료: {len(drive_files)}개")
+                print(f"✅ sources 안전 처리 완료: {len(sources)}개")
+
+            except Exception as data_error:
+                print(f"❌ 응답 데이터 처리 중 오류: {data_error}")
+                drive_files = []
+                sources = []
+
             return AgentQueryResponse(
                 success=True,
                 user_id=request.user_id,
                 query=request.query,
-                output=result["output"],
+                output=result.get("output", "응답을 생성할 수 없습니다."),
                 intermediate_steps=result.get("intermediate_steps", []),
                 rag_results=result.get("rag_results", []),
-                sources=result.get("sources", []),
+                sources=sources,
+                drive_files=drive_files,  # 구글 드라이브 파일 정보 추가
                 total_conversations=len(chat_history),
             )
         else:

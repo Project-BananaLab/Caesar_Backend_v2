@@ -4,6 +4,8 @@ from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any
+from urllib.parse import quote
+import boto3, os
 import os
 import json
 import requests
@@ -399,6 +401,58 @@ async def get_service_tokens(user_id: str, service: str):
 async def health_check():
     """서버 상태 확인"""
     return {"status": "healthy", "message": "서버가 정상적으로 작동 중입니다"}
+
+
+# # 파일 다운로드 전용 엔드포인트 (Content-Disposition: attachment)
+# @app.get("/download/{doc_id}")
+# async def download_file_by_id(doc_id: int):
+#     """
+#     문서 ID로 파일 다운로드 (S3 presigned URL로 redirect)
+#     """
+#     try:
+#         from app.utils.db import get_db
+#         from app.features.admin.models.docs import Doc
+
+#         db = next(get_db())
+#         doc = db.query(Doc).filter(Doc.id == doc_id).first()
+#         db.close()
+
+#         if not doc or not doc.file_url:
+#             raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+
+#         # S3 object key 추출 (예: https://.../uploads/xxx.xlsx → uploads/xxx.xlsx)
+#         file_url = doc.file_url
+#         bucket_name = os.getenv("S3_BUCKET_NAME")
+#         object_key = file_url.split(f"{bucket_name}/")[-1]  # 키만 추출
+
+#         s3_client = boto3.client(
+#             "s3",
+#             aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+#             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+#             region_name=os.getenv("AWS_REGION", "ap-northeast-2"),
+#         )
+
+#         # Presigned URL 생성 (다운로드 강제)
+#         encoded_name = quote(doc.file_name)
+#         presigned_url = s3_client.generate_presigned_url(
+#             "get_object",
+#             Params={
+#                 "Bucket": bucket_name,
+#                 "Key": object_key,
+#                 "ResponseContentDisposition": f"attachment; filename*=UTF-8''{encoded_name}",
+#             },
+#             ExpiresIn=3600,
+#         )
+
+#         return RedirectResponse(url=presigned_url, status_code=302)
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         print(f"❌ 파일 다운로드 오류: {e}")
+#         raise HTTPException(
+#             status_code=500, detail="파일 다운로드 중 오류가 발생했습니다."
+#         )
 
 
 @app.get("/services")
