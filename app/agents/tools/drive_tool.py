@@ -93,7 +93,11 @@ def create_drive_tools(user_id: str, cookies: dict = None):
                         download_link = (
                             f"https://drive.google.com/uc?export=download&id={file_id}"
                         )
-                        view_link = file.get("webViewLink", "")
+                        # 미리보기 링크: webViewLink가 없으면 직접 생성
+                        view_link = (
+                            file.get("webViewLink")
+                            or f"https://drive.google.com/file/d/{file_id}/view"
+                        )
 
                         result.append(
                             f"• {name} ({file_type}) - 수정일: {modified}\n"
@@ -101,6 +105,8 @@ def create_drive_tools(user_id: str, cookies: dict = None):
                             f"  👁️ 미리보기: {view_link}"
                         )
                         print(f"✅ 파일 {i+1} 처리 완료: {name}")
+                        print(f"   - 다운로드: {download_link}")
+                        print(f"   - 미리보기: {view_link}")
                     else:
                         result.append(f"• {name} ({file_type}) - 수정일: {modified}")
                         print(f"✅ 폴더 {i+1} 처리 완료: {name}")

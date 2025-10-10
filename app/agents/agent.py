@@ -35,6 +35,11 @@ You are Caesar, an intelligent AI assistant that helps users manage their Google
 - Internal document search: internal_rag_search - Search information from uploaded files (PDF/DOCX/XLSX)
 - Notion document search: notion_rag_search - Search information from Notion workspace pages
 
+📂 Google Drive Response Guide:
+When you find files in Google Drive using list_drive_files, respond like this:
+"구글 드라이브에서 '[파일명]' 파일을 찾았습니다. 아래 미리보기 버튼을 클릭하여 파일을 확인하실 수 있습니다."
+DO NOT ask for additional actions - the user can use the preview button that will appear automatically.
+
 🚨 Document Search Tool Selection Guide (VERY IMPORTANT!):
 
 📁 Use internal_rag_search when:
@@ -479,16 +484,11 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
                     }
                 )
             else:
-                # S3 URL이 없으면 기존 방식 사용
-                print(f"⚠️ 파일 정보 없음, 기본 방식 사용: {filename}")
-                sources.append(
-                    {
-                        "source_type": "file",
-                        "filename": filename,
-                        "preview_url": f"/static/previews/{filename}",
-                        "download_url": f"/files/{filename}",
-                    }
+                # ❌ S3 URL이 없으면 /static 경로로 대체하지 않고, 단순히 로그만 남김
+                print(
+                    f"⚠️ 파일 정보 없음 (DB 미등록): {filename}, sources에 추가하지 않음."
                 )
+                continue  # ✅ 더 이상 /static/... 경로로 대체하지 않음
 
         # 노션 기반 RAG 처리
         for r in rag_results:
@@ -503,6 +503,34 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
                         "url": r.get("url") or "",
                     }
                 )
+
+        # 구글 드라이브 파일 정보를 sources에 추가
+        print(f"🔍 drive_files 배열 길이: {len(drive_files)}")
+        for i, drive_file in enumerate(drive_files):
+            print(f"🔍 drive_file {i+1}: {drive_file}")
+
+            # 드라이브 파일에 링크가 있거나 이름이 있으면 추가
+            if drive_file.get("name"):
+                # webViewLink가 없으면 webContentLink를 미리보기로 사용
+                preview_link = drive_file.get("webViewLink") or drive_file.get(
+                    "webContentLink"
+                )
+                download_link = drive_file.get("webContentLink")
+
+                drive_source = {
+                    "source_type": "drive",
+                    "filename": drive_file.get("name", "구글 드라이브 파일"),
+                    "s3_url": preview_link,  # 미리보기 링크
+                    "download_url": download_link,  # 다운로드 링크
+                    "preview_url": preview_link,
+                }
+                sources.append(drive_source)
+                print(
+                    f"✅ 구글 드라이브 파일을 sources에 추가: {drive_file.get('name')}"
+                )
+                print(f"✅ 추가된 source 정보: {drive_source}")
+            else:
+                print(f"❌ 드라이브 파일에 링크 정보 없음: {drive_file.get('name')}")
 
         print(f"🎯 최종 Sources 배열: {sources}")
 
