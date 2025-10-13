@@ -112,7 +112,6 @@ def create_notion_tools(user_id: str):
                     pages.append(f"📄 {title}")
                     pages.append(f"   🆔 ID: {item_id} | 📅 수정: {last_edited}")
 
-                elif item.get("object") == "database":
                     # 데이터베이스 제목 추출
                     title_array = item.get("title", [])
                     if title_array:
@@ -373,6 +372,13 @@ def create_notion_tools(user_id: str):
                     )
                     if text:
                         content_list.append(f"- {text}")
+
+            # 노션 페이지 링크 생성 (하이픈 제거한 32자리 ID)
+            page_id_clean = page_id.replace("-", "")
+            notion_url = f"https://www.notion.so/{page_id_clean}"
+
+            # 마크다운 형식으로 링크 추가
+            content_list.append(f"\n[{title} 페이지 링크]({notion_url})")
 
             return "\n".join(content_list)
 

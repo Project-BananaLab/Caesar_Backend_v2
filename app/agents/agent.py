@@ -12,6 +12,7 @@ import app.utils.env_loader as env_loader
 from typing import List, Dict, Any
 from datetime import datetime
 import os
+import re
 from app.rag.internal_data_rag.user_aware_retrieve import create_user_aware_rag_tools
 from app.rag.notion_rag_tool.notion_rag_tool import (
     get_company_id_by_user_id,
@@ -301,7 +302,7 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
                             print(f"🔍 간단한 패턴으로 찾은 파일: {simple_matches}")
 
                             # 파일 정보 패턴 매칭 (이모지 제외하고 더 안전한 패턴 사용)
-                            file_pattern = r"• ([^(]+) \(파일\) - 수정일: ([^\n]+)\n  .+ 다운로드: ([^\n]+)\n  .+ 미리보기: ([^\n]+)"
+                            file_pattern = r"• ([^(]+) \(파일\) - 수정일: ([^\n]+)\n   다운로드: ([^\n]+)\n   미리보기: ([^\n]+)"
                             matches = re.findall(file_pattern, content, re.UNICODE)
 
                             print(f"🔍 정규식 매칭 결과: {len(matches)}개")
@@ -496,11 +497,46 @@ def run_agent(user_id: str, openai_api_key: str, query: str, cookies: dict = Non
                 r.get("source") == "notion_rag_search"
                 or r.get("source_type") == "notion"
             ):
+                content = r.get("content", "")
+
+                # 노션 RAG 결과에서 페이지 정보 추출
+                page_title = "Notion 문서"
+                notion_url = ""
+                chunk_info = ""
+
+                # "📄 페이지제목" 패턴에서 제목 추출
+                if "📄" in content:
+                    title_match = content.split("📄")[1].split("\n")[0].strip()
+                    if title_match:
+                        page_title = title_match
+
+                # "📍 위치: 청크 X" 패턴에서 청크 정보 추출
+                if "📍 위치:" in content:
+                    chunk_match = content.split("📍 위치:")[1].split("\n")[0].strip()
+                    if chunk_match:
+                        chunk_info = chunk_match
+
+                # "🔗 링크: [텍스트](https://www.notion.so/...)" 패턴에서 URL 추출
+                if "🔗 링크:" in content:
+                    import re as regex_module
+
+                    link_line = content.split("🔗 링크:")[1].split("\n")[0].strip()
+                    # 마크다운 링크 형태에서 URL 추출
+                    markdown_match = regex_module.search(
+                        r"\[([^\]]+)\]\((https?://[^\s)]+)\)", link_line
+                    )
+                    if markdown_match:
+                        notion_url = markdown_match.group(2)
+                    else:
+                        # 일반 텍스트 링크인 경우
+                        notion_url = link_line
+
                 sources.append(
                     {
                         "source_type": "notion",
-                        "title": r.get("title") or "Notion 문서",
-                        "url": r.get("url") or "",
+                        "title": f"{page_title} ({chunk_info})",
+                        "url": notion_url,
+                        "s3_url": notion_url,  # 미리보기용
                     }
                 )
 

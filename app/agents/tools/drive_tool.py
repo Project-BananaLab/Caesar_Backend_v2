@@ -101,8 +101,8 @@ def create_drive_tools(user_id: str, cookies: dict = None):
 
                         result.append(
                             f"• {name} ({file_type}) - 수정일: {modified}\n"
-                            f"  📥 다운로드: {download_link}\n"
-                            f"  👁️ 미리보기: {view_link}"
+                            f"   다운로드: {download_link}\n"
+                            f"   미리보기: {view_link}"
                         )
                         print(f"✅ 파일 {i+1} 처리 완료: {name}")
                         print(f"   - 다운로드: {download_link}")

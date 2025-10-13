@@ -37,10 +37,26 @@ def create_slack_tools(user_id: str):
         try:
             headers = get_slack_headers()
 
-            # JSON 파싱
-            message_data = json.loads(query)
-            channel = message_data.get("channel")
-            text = message_data.get("text")
+            # JSON 파싱 시도
+            try:
+                message_data = json.loads(query)
+                channel = message_data.get("channel")
+                # text 또는 message 필드 모두 지원
+                text = message_data.get("text") or message_data.get("message")
+            except json.JSONDecodeError:
+                # JSON이 아닌 경우, 단순 문자열로 처리
+                print(f"⚠️ JSON이 아닌 단순 문자열로 전달됨: {query}")
+                # 기본 채널명 추출 시도 (한국어 채널명 패턴)
+                if "채널" in query and "에" in query:
+                    # "cnp유튜브 채널에 메시지" 형태에서 채널명 추출
+                    parts = query.split("채널에")
+                    if len(parts) >= 2:
+                        channel = parts[0].strip()
+                        text = parts[1].strip()
+                    else:
+                        return f'채널명을 찾을 수 없습니다. JSON 형식으로 다시 시도해주세요: {{"channel": "채널명", "text": "메시지내용"}}'
+                else:
+                    return f'잘못된 형식입니다. JSON 형식으로 다시 시도해주세요: {{"channel": "채널명", "text": "메시지내용"}}'
 
             payload = {"channel": channel, "text": text}
 
