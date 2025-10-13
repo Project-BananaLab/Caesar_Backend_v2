@@ -1,0 +1,163 @@
+* [33m105a47e[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mpreview/sora-250930[m[33m, [m[1;31morigin/preview/sora-250930[m[33m)[m 시연 영상용 코드 수정 완료
+*   [33m6a87dcf[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Merge pull request #41 from Project-BananaLab/mina
+[32m|[m[33m\[m  
+[32m|[m * [33md27d98a[m 내부문서 RAG 고도화
+[32m|[m[32m/[m  
+*   [33m44ff609[m Merge pull request #40 from Project-BananaLab/preview/sora-250930
+[34m|[m[35m\[m  
+[34m|[m * [33m7671add[m 노션링크, 드라이브 미리보기 수정완료
+* [35m|[m   [33m9e1d6ce[m Merge pull request #39 from Project-BananaLab/mina
+[35m|[m[1;31m\[m [35m\[m  
+[35m|[m [1;31m|[m[35m/[m  
+[35m|[m[35m/[m[1;31m|[m   
+[35m|[m * [33m61dfc67[m 내부 문서 RAG 성능 개선 진행중
+* [1;31m|[m   [33m8939394[m Merge pull request #38 from Project-BananaLab/preview/sora-250930
+[1;32m|[m[1;33m\[m [1;31m\[m  
+[1;32m|[m * [1;31m\[m   [33m80bb043[m Merge branch 'main' into preview/sora-250930
+[1;32m|[m [1;34m|[m[1;32m\[m [1;31m\[m  
+[1;32m|[m [1;34m|[m[1;32m/[m [1;31m/[m  
+[1;32m|[m[1;32m/[m[1;34m|[m [1;31m|[m   
+* [1;34m|[m [1;31m|[m   [33mff3b2f7[m Merge pull request #37 from Project-BananaLab/mina
+[1;36m|[m[1;31m\[m [1;34m\[m [1;31m\[m  
+[1;36m|[m [1;31m|[m [1;34m|[m[1;31m/[m  
+[1;36m|[m [1;31m|[m[1;31m/[m[1;34m|[m   
+[1;36m|[m * [1;34m|[m [33mcc7dde5[m 프롬프트 수정(내부문서,노션,에이전트)
+[1;36m|[m[1;36m/[m [1;34m/[m  
+[1;36m|[m * [33m0c547f4[m 미리보기, 링크열기, 다운로드 수정중
+[1;36m|[m[1;36m/[m  
+*   [33m0a2eb45[m Merge pull request #36 from Project-BananaLab/kim
+[32m|[m[33m\[m  
+[32m|[m * [33maa86400[m env설정, notion tool에서 노션 내용만 검색되도록 필터 설정
+[32m|[m[32m/[m  
+*   [33m0394677[m Merge pull request #35 from Project-BananaLab/mina
+[34m|[m[35m\[m  
+[34m|[m * [33m870c310[m 관리자 화면 목록 표출 수정
+[34m|[m[34m/[m  
+*   [33mc714bcd[m Merge pull request #34 from Project-BananaLab/preview/sora-250930
+[36m|[m[1;31m\[m  
+[36m|[m * [33m3194497[m 프리뷰 세팅 중
+[36m|[m * [33m3f1ebb1[m 구글연동 수정
+* [1;31m|[m   [33m210f1c1[m Merge pull request #33 from Project-BananaLab/mina-rebased
+[1;32m|[m[1;33m\[m [1;31m\[m  
+[1;32m|[m * [1;31m|[m [33m6169d15[m 내부 문서 관련 RAG 및 프롬프트 수정
+[1;32m|[m[1;32m/[m [1;31m/[m  
+* [1;31m|[m   [33m67c41bd[m Merge pull request #31 from Project-BananaLab/kim
+[1;34m|[m[1;35m\[m [1;31m\[m  
+[1;34m|[m * [1;31m|[m [33m46c0cbe[m 노션 rag 연결 오류 해결
+[1;34m|[m[1;34m/[m [1;31m/[m  
+* [1;31m|[m   [33mbedc6aa[m[33m ([m[1;32mmain[m[33m)[m Merge pull request #30 from Project-BananaLab/googleAgent/sora-250930
+[1;31m|[m[31m\[m [1;31m\[m  
+[1;31m|[m [31m|[m[1;31m/[m  
+[1;31m|[m[1;31m/[m[31m|[m   
+[1;31m|[m * [33mc08743c[m[33m ([m[1;31morigin/googleAgent/sora-250930[m[33m, [m[1;32mgoogleAgent/sora-250930[m[33m)[m 구글연동 수정
+* [31m|[m [33mc8cd111[m Merge pull request #29 from Project-BananaLab/googleAgent/sora-250930
+[32m|[m[31m\[m[31m|[m 
+[32m|[m * [33m1cf5931[m 구글에이전트 연동,채널 리스트 수정완료
+* [33m|[m   [33mc546376[m Merge pull request #28 from Project-BananaLab/mina
+[33m|[m[35m\[m [33m\[m  
+[33m|[m [35m|[m[33m/[m  
+[33m|[m[33m/[m[35m|[m   
+[33m|[m * [33m056a62c[m 내부 문서 개인 업로드 기능 구현
+[33m|[m[33m/[m  
+*   [33m86bd77d[m[33m ([m[1;32mlist[m[33m)[m Merge pull request #27 from Project-BananaLab/kim
+[36m|[m[1;31m\[m  
+[36m|[m * [33ma2a5cfd[m 관리자 노션 추출시 기존에 있는 것 삭제 후 생성, 노션만 삭제되게 함
+[36m|[m[36m/[m  
+*   [33md0b5871[m Merge pull request #26 from Project-BananaLab/mina
+[1;32m|[m[1;33m\[m  
+[1;32m|[m * [33mb63679e[m[33m ([m[1;31morigin/mina[m[33m)[m 관리자 직원 관리 기능
+[1;32m|[m[1;32m/[m  
+*   [33m8e44ad9[m Merge pull request #25 from Project-BananaLab/kim
+[1;34m|[m[1;35m\[m  
+[1;34m|[m * [33mde79421[m vectordb collection 이름을 회사코드에 맞게 찾도록 수정
+[1;34m|[m[1;34m/[m  
+*   [33mbc75462[m Merge pull request #24 from Project-BananaLab/mina
+[1;36m|[m[31m\[m  
+[1;36m|[m * [33m0e01cdc[m 내부 문서 Chroma Cloud 연동
+[1;36m|[m[1;36m/[m  
+*   [33me3efe38[m Merge pull request #23 from Project-BananaLab/kim
+[32m|[m[33m\[m  
+[32m|[m * [33mcb48b2a[m vectorDB에 저장되는 이름 변경
+[32m|[m[32m/[m  
+*   [33m225c9b5[m Merge pull request #22 from Project-BananaLab/kim
+[34m|[m[35m\[m  
+[34m|[m * [33m2ac7ce7[m 회사 노션 관련 업데이트
+[34m|[m[34m/[m  
+*   [33mfe71a78[m Merge pull request #21 from Project-BananaLab/mina
+[36m|[m[1;31m\[m  
+[36m|[m * [33m34843a8[m 16:40 txt,csv 글씨 깨짐 해결
+* [1;31m|[m [33m1640e1f[m Merge pull request #20 from Project-BananaLab/mina
+[1;32m|[m[1;31m\[m[1;31m|[m 
+[1;32m|[m * [33m37f732f[m 250926 15:31 관리자 페이지 리스트 UI 편집
+* [1;33m|[m [33mad256eb[m Merge pull request #19 from Project-BananaLab/mina
+[1;34m|[m[1;33m\[m[1;33m|[m 
+[1;34m|[m * [33m623c1ef[m 250926 13:02 사용자 로그인 시 회사코드 연동
+* [1;35m|[m [33mbb0997f[m Merge pull request #18 from Project-BananaLab/mina
+[1;36m|[m[1;35m\[m[1;35m|[m 
+[1;36m|[m * [33m19a1561[m 250925 18:46
+[1;36m|[m[1;36m/[m  
+[1;36m|[m * [33m86e4d2b[m[33m ([m[1;31morigin/backpu/sora-250929[m[33m)[m 챗, 채널 프론트 연동 백업
+[1;36m|[m[1;36m/[m  
+*   [33mb297667[m Merge pull request #17 from Project-BananaLab/sora
+[33m|[m[34m\[m  
+[33m|[m *   [33m4ae3f14[m[33m ([m[1;31morigin/sora[m[33m)[m Merge branch 'main' of https://github.com/Project-BananaLab/Caesar_Backend_v2 into sora
+[33m|[m [35m|[m[33m\[m  
+[33m|[m [35m|[m[33m/[m  
+[33m|[m[33m/[m[35m|[m   
+* [35m|[m   [33mc2cabc1[m Merge pull request #15 from Project-BananaLab/kim
+[1;31m|[m[1;32m\[m [35m\[m  
+[1;31m|[m * [35m|[m [33m8c8b6b3[m 노션과 슬랙 api 연결
+[1;31m|[m[1;31m/[m [35m/[m  
+* [35m|[m   [33mfa6049e[m Merge pull request #13 from Project-BananaLab/mina
+[1;33m|[m[1;34m\[m [35m\[m  
+[1;33m|[m * [35m|[m [33m409fdd3[m 관리자 excel 업로드 에러 해결
+* [1;34m|[m [35m|[m [33m19aa9e6[m Merge pull request #12 from Project-BananaLab/mina
+[1;35m|[m[1;34m\[m[1;34m|[m [35m|[m 
+[1;35m|[m * [35m|[m [33m24c9530[m [wip] 관리자 파일 crud (RAG기능 연결 불완전)
+[1;35m|[m[1;35m/[m [35m/[m  
+* [35m|[m   [33ma84a588[m Merge pull request #11 from Project-BananaLab/sora
+[31m|[m[32m\[m [35m\[m  
+[31m|[m [32m|[m * [33meaa7f7d[m 챗,채널api 프론트 연동완료
+[31m|[m [32m|[m[32m/[m  
+[31m|[m * [33m009b7cd[m 데이터베이스 통일, .env통합 파일 세팅
+[31m|[m[31m/[m  
+*   [33m35bc3aa[m Merge pull request #10 from Project-BananaLab/kim
+[33m|[m[34m\[m  
+[33m|[m * [33m6b847e6[m 머지 후 올리기
+[33m|[m * [33ma642275[m 일단 구글 로그인과 employee DB연결
+[33m|[m[33m/[m  
+*   [33mb3f61d7[m Merge pull request #9 from Project-BananaLab/mina
+[35m|[m[36m\[m  
+[35m|[m * [33m1f8cea2[m 회사 로그인 구현
+[35m|[m[35m/[m  
+*   [33me7fd7e1[m Merge pull request #8 from Project-BananaLab/kim
+[1;31m|[m[1;32m\[m  
+[1;31m|[m * [33m5ae1cff[m employee 추가
+[1;31m|[m[1;31m/[m  
+*   [33m903f7e8[m Merge pull request #5 from Project-BananaLab/sora
+[1;33m|[m[1;34m\[m  
+[1;33m|[m *   [33m1036bad[m Merge main into sora - resolved conflicts
+[1;33m|[m [1;35m|[m[1;33m\[m  
+[1;33m|[m [1;35m|[m[1;33m/[m  
+[1;33m|[m[1;33m/[m[1;35m|[m   
+* [1;35m|[m   [33med02e74[m Merge pull request #4 from Project-BananaLab/kim
+[31m|[m[32m\[m [1;35m\[m  
+[31m|[m * [1;35m|[m [33mc72f8b2[m employee, job_rank, job_ dept 연결
+[31m|[m * [1;35m|[m [33mf667d55[m Fix .gitignore and remove cached files
+[31m|[m[31m/[m [1;35m/[m  
+* [1;35m|[m   [33m97a068b[m Merge pull request #3 from Project-BananaLab/kim
+[33m|[m[34m\[m [1;35m\[m  
+[33m|[m * [1;35m|[m [33mc440245[m 파일 위치 변경
+[33m|[m[33m/[m [1;35m/[m  
+* [1;35m|[m   [33m41031f3[m Merge pull request #2 from Project-BananaLab/kim
+[35m|[m[36m\[m [1;35m\[m  
+[35m|[m * [1;35m|[m [33m9dcd114[m schemas 추가
+[35m|[m * [1;35m|[m [33m496e2ba[m api 암호화와 복호화 추가. 깃이그노어에 추가
+[35m|[m[35m/[m [1;35m/[m  
+* [1;35m|[m   [33mee49625[m Merge pull request #1 from Project-BananaLab/sora
+[1;31m|[m[1;32m\[m [1;35m\[m  
+[1;31m|[m [1;32m|[m * [33m17863f5[m agent 프론트 연결완료
+[1;31m|[m [1;32m|[m[1;32m/[m  
+[1;31m|[m * [33m68c4cb1[m test.py 추가
+[1;31m|[m[1;31m/[m  
+* [33m3c84bce[m first commit
