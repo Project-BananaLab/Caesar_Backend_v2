@@ -742,7 +742,12 @@ class IngestService:
                 existing = col.get(where={"doc_id": extra_meta.get("doc_id")}) if extra_meta.get("doc_id") else col.get(where={"source": file_name})
                 if existing and existing.get("ids"): col.delete(ids=existing["ids"]); print(f"🗑 기존 {len(existing['ids'])}개 삭제")
             except Exception as e: print(f"⚠️ 기존 삭제 오류: {e}")
-            base_id=Path(file_path).stem; ids=[f"{base_id}-{i}" for i in range(len(chunks))]
+            # Chroma Cloud ID 크기 제한 (128바이트) 해결: 해시 기반 짧은 ID 사용
+            import hashlib
+            file_name = Path(file_path).name
+            file_hash = hashlib.md5(file_name.encode('utf-8')).hexdigest()[:8]  # 8자리 해시
+            base_id = f"doc_{file_hash}"  # 예: doc_a1b2c3d4
+            ids = [f"{base_id}_{i}" for i in range(len(chunks))]  # 예: doc_a1b2c3d4_0
             file_hash=_sha256(raw_text)
             final_metas=[]
             for i,(c,m) in enumerate(zip(chunks, metas)):
