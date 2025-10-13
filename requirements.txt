@@ -154,4 +154,5 @@ boto3
 langchain-text-splitters
 scikit-learn
 pytesseract
-fitz
+PyMuPDF
+sentence-transformers

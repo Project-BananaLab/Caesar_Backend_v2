@@ -67,6 +67,8 @@ def handle_upload_and_ingest(
             "docId": existing.id,
             "chunks": existing.chunks_count,
             "url": existing.file_url,
+            "message": f"동일한 파일이 이미 존재합니다: {existing.file_name}",
+            "existingFileName": existing.file_name,
         }
 
     # ── 2) S3 업로드 (내용주소화 방식으로: 같은 내용은 물리적으로 1회만 업로드)
@@ -110,6 +112,8 @@ def handle_upload_and_ingest(
                 "docId": winner.id,
                 "chunks": winner.chunks_count,
                 "url": winner.file_url,
+                "message": f"동일한 파일이 이미 존재합니다: {winner.file_name}",
+                "existingFileName": winner.file_name,
             }
         # 예외가 다른 원인이라면 다시 던져도 됨
         raise

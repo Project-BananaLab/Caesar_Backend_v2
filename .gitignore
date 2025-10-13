@@ -16,3 +16,6 @@ chroma_data/chroma.sqlite3
 chroma_data/*
 
 storage/*
+
+# 테스트 폴더
+test/

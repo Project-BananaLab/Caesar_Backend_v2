@@ -7,7 +7,16 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.core.config import settings
 
 # SQLAlchemy 엔진 (pre-ping으로 끊어진 연결 자동 감지)
-engine = create_engine(settings.DB_URL, pool_pre_ping=True)
+engine = create_engine(
+    settings.DB_URL, 
+    pool_pre_ping=True,
+    pool_timeout=30,  # 연결 타임아웃 30초
+    pool_recycle=3600,  # 1시간마다 연결 재생성
+    connect_args={
+        "connect_timeout": 60,  # PostgreSQL 연결 타임아웃 60초
+        "application_name": "caesar_backend"
+    }
+)
 
 # 세션 팩토리                                               # 선택: 커밋 후 객체 즉시 재사용할 때 편함
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
