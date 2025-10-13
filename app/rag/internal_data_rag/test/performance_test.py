@@ -1,9 +1,11 @@
+# app/rag/internal_data_rag/test/performance_test.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 내부 문서 RAG 성능 테스트
 - 검색 속도 측정
 - 답변 정확도 평가
+- 검색 정확도(Hit@k, MRR, nDCG) — source(파일명) 기준 매칭
 - 시각화 결과 생성
 """
 
@@ -12,7 +14,7 @@ import sys
 import time
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
@@ -34,6 +36,102 @@ except ImportError:
     HAS_MATPLOTLIB = False
     print("matplotlib가 설치되지 않아 시각화 기능을 사용할 수 없습니다.")
 
+# ─────────────────────────────────────────
+# 골드셋 로더 (source = 파일명 기준)
+# ─────────────────────────────────────────
+def load_goldset(path: str) -> Dict[str, Dict[str, List[str]]]:
+    """
+    골드셋(JSON) 로드 → {query: {"source": ["파일A.pdf", "파일B.docx", ...]}}
+    - 항목 예시:
+      { "query": "질문", "gold": { "source": ["문서1.pdf", "문서2.docx"] } }
+      또는 "source": "문서1.pdf" (단일 문자열도 허용)
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    gold: Dict[str, Dict[str, List[str]]] = {}
+    for item in data:
+        q = (item.get("query") or "").strip()
+        g = item.get("gold") or {}
+        src = g.get("source")
+        if not q or src is None:
+            continue
+        if isinstance(src, str):
+            srcs = [src]
+        elif isinstance(src, list):
+            srcs = [str(s) for s in src if s]
+        else:
+            srcs = []
+        if srcs:
+            gold[q] = {"source": srcs}
+    return gold
+
+# ─────────────────────────────────────────
+# 검색 지표 계산 (source = 파일명 기준)
+# ─────────────────────────────────────────
+def _extract_sources_from_contexts(contexts: List[Any]) -> List[str]:
+    """
+    retrieve_documents()가 반환한 contexts에서 source(파일명) 리스트를
+    순서를 보존하여 추출 (중복 제거).
+    기대 형태: [(text, meta_dict), ...] 이며 meta_dict['source'] 사용.
+    """
+    seen = set()
+    ordered = []
+    for item in contexts:
+        try:
+            if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], dict):
+                src = item[1].get("source")
+            elif isinstance(item, dict):
+                meta = item.get("metadata", {})
+                src = meta.get("source") if isinstance(meta, dict) else item.get("source")
+            else:
+                src = None
+        except Exception:
+            src = None
+        if not src:
+            continue
+        src = str(src)
+        if src not in seen:
+            seen.add(src)
+            ordered.append(src)
+    return ordered
+
+def compute_retrieval_metrics_by_source(
+    topk_sources: List[str],
+    gold_sources: List[str],
+    k: int
+) -> Dict[str, float]:
+    """
+    source(파일명) 기준 검색 지표
+    - Hit@k: 상위 k 내 골드 문서(source)가 1개 이상 존재하면 1
+    - MRR: 최초 적중 랭크의 역수
+    - nDCG@k: binary relevance 가정
+    """
+    import math
+
+    topk = [s.lower() for s in topk_sources[:k]]
+    gold_set = set(s.lower() for s in gold_sources)
+
+    # 최초 적중 랭크
+    rank_of_first = None
+    for rank, src in enumerate(topk, start=1):
+        if src in gold_set:
+            rank_of_first = rank
+            break
+
+    hit_at_k = 1.0 if rank_of_first is not None else 0.0
+    mrr = (1.0 / rank_of_first) if rank_of_first else 0.0
+
+    # nDCG@k (binary rel): DCG = sum( rel_i / log2(i+1) ), IDCG = 1 (상위 1개 적중이 이상적)
+    gains = []
+    for rank, src in enumerate(topk, start=1):
+        rel = 1.0 if src in gold_set else 0.0
+        gains.append(rel / math.log2(rank + 1))
+    dcg = sum(gains)
+    idcg = 1.0  # 단일 관련문서 기준의 이상적 DCG
+    ndcg = (dcg / idcg) if idcg > 0 else 0.0
+
+    return {"hit@k": float(hit_at_k), "mrr": float(mrr), "ndcg@k": float(ndcg)}
+
 @dataclass
 class PerformanceMetrics:
     """성능 측정 결과"""
@@ -42,10 +140,18 @@ class PerformanceMetrics:
     retrieval_time: float  # 검색 시간 (초)
     total_time: float      # 총 응답 시간 (초)
     answer_length: int     # 답변 길이
+
+    # 기존 답변 정확도 지표
     accuracy_score: Optional[float] = None      # 키워드 기반 정확도 점수 (0-10)
     llm_accuracy_score: Optional[float] = None  # LLM 기반 정확도 점수 (0-10)
     embedding_similarity: Optional[float] = None # 임베딩 유사도 점수 (0-1)
     final_accuracy_score: Optional[float] = None # 종합 정확도 점수 (0-10)
+
+    # 추가: 검색 정확도 지표(문서=source 기준)
+    hit_at_k: Optional[float] = None
+    mrr: Optional[float] = None
+    ndcg_at_k: Optional[float] = None
+
     timestamp: str = None
     
     def __post_init__(self):
@@ -53,13 +159,19 @@ class PerformanceMetrics:
             self.timestamp = datetime.now().isoformat()
 
 class RAGPerformanceTester:
-    """RAG 성능 테스터"""
+    """RAG 성능 테스터 (source 매칭 골드셋 지원)"""
     
-    def __init__(self):
+    def __init__(self, gold_path: Optional[str] = None, eval_k: int = 5):
         self.results: List[PerformanceMetrics] = []
         self.retrieve_documents = None
         self.generate_answer = None
-        
+        self.gold: Dict[str, Dict[str, List[str]]] = {}
+        self.eval_k = eval_k
+
+        if gold_path and os.path.exists(gold_path):
+            self.gold = load_goldset(gold_path)
+            print(f"골드셋 로드: {len(self.gold)}개 쿼리")
+
     def import_services(self):
         """RAG 서비스 임포트"""
         try:
@@ -109,75 +221,51 @@ class RAGPerformanceTester:
         ]
     
     def evaluate_keyword_accuracy(self, query: str, answer: str) -> float:
-        """키워드 기반 정확도 평가"""
+        """키워드 기반 정확도 평가(간단 휴리스틱)"""
         if not answer or len(answer.strip()) < 10:
             return 0.0
-        
-        # 키워드 매칭 기반 간단한 평가
         query_keywords = set(query.lower().replace('?', '').replace('.', '').split())
         answer_keywords = set(answer.lower().replace('?', '').replace('.', '').split())
-        
-        # 공통 키워드 비율
         common_keywords = query_keywords.intersection(answer_keywords)
         if not query_keywords:
-            return 5.0  # 기본 점수
-        
+            return 5.0
         keyword_score = len(common_keywords) / len(query_keywords)
-        
-        # 답변 길이 보정 (너무 짧거나 긴 답변 페널티)
         length_score = 1.0
         if len(answer) < 50:
             length_score = 0.5
         elif len(answer) > 1000:
             length_score = 0.8
-        
-        # 최종 점수 (0-10 스케일)
         final_score = min(10.0, (keyword_score * 0.7 + length_score * 0.3) * 10)
         return round(final_score, 2)
     
     def evaluate_llm_accuracy(self, query: str, answer: str) -> Optional[float]:
-        """LLM 기반 정확도 평가 (GPT 사용)"""
+        """LLM 기반 정확도 평가 (OpenAI)"""
         try:
             from langchain_openai import ChatOpenAI
             from langchain_core.prompts import ChatPromptTemplate
             from langchain_core.output_parsers import StrOutputParser
-            
-            # OpenAI API 키 확인
             if not os.getenv("OPENAI_API_KEY"):
                 print("  LLM 평가 건너뜀: OPENAI_API_KEY 없음")
                 return None
-            
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-            
             prompt = ChatPromptTemplate.from_messages([
                 ("system", """
                 당신은 RAG 시스템의 답변 품질을 평가하는 전문가입니다.
                 주어진 질문과 답변을 분석하여 답변의 품질을 0-10점으로 평가하세요.
-                
-                평가 기준:
-                1. 정확성 (40%): 답변이 질문에 정확히 대답하는가?
-                2. 완성도 (30%): 답변이 충분히 상세하고 완전한가?
-                3. 관련성 (20%): 답변이 질문과 관련이 있는가?
-                4. 명확성 (10%): 답변이 이해하기 쉽고 명확한가?
-                
-                점수만 숫자로 반환하세요 (예: 8.5).
+                기준: 정확성(40) 완성도(30) 관련성(20) 명확성(10)
+                점수만 숫자로 반환하세요(예: 8.5).
                 """),
                 ("user", "질문: {question}\n\n답변: {answer}")
             ])
-            
             chain = prompt | llm | StrOutputParser()
             result = chain.invoke({"question": query, "answer": answer})
-            
-            # 숫자 추출
             import re
-            score_match = re.search(r'(\d+\.?\d*)', result.strip())
-            if score_match:
-                score = float(score_match.group(1))
-                return min(10.0, max(0.0, score))  # 0-10 범위로 제한
-            else:
-                print(f"  LLM 평가 파싱 실패: {result}")
-                return None
-                
+            m = re.search(r'(\d+\.?\d*)', result.strip())
+            if m:
+                score = float(m.group(1))
+                return min(10.0, max(0.0, score))
+            print(f"  LLM 평가 파싱 실패: {result}")
+            return None
         except Exception as e:
             print(f"  LLM 평가 오류: {e}")
             return None
@@ -187,28 +275,16 @@ class RAGPerformanceTester:
         try:
             from langchain_openai import OpenAIEmbeddings
             import numpy as np
-            
-            # OpenAI API 키 확인
             if not os.getenv("OPENAI_API_KEY"):
                 print("  임베딩 평가 건너뜀: OPENAI_API_KEY 없음")
                 return None
-            
             embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-            
-            # 질문과 답변의 임베딩 생성
-            query_embedding = embeddings.embed_query(query)
-            answer_embedding = embeddings.embed_query(answer)
-            
-            # 코사인 유사도 계산
-            query_vec = np.array(query_embedding)
-            answer_vec = np.array(answer_embedding)
-            
-            similarity = np.dot(query_vec, answer_vec) / (
-                np.linalg.norm(query_vec) * np.linalg.norm(answer_vec)
-            )
-            
-            return float(similarity)  # 0-1 범위
-            
+            qv = embeddings.embed_query(query)
+            av = embeddings.embed_query(answer)
+            import numpy as np
+            q = np.array(qv); a = np.array(av)
+            sim = float(np.dot(q, a) / (np.linalg.norm(q) * np.linalg.norm(a)))
+            return sim
         except Exception as e:
             print(f"  임베딩 평가 오류: {e}")
             return None
@@ -216,69 +292,53 @@ class RAGPerformanceTester:
     def calculate_final_accuracy(self, keyword_score: float, llm_score: Optional[float], 
                                embedding_score: Optional[float]) -> float:
         """종합 정확도 점수 계산"""
-        scores = []
-        weights = []
-        
-        # 키워드 점수 (기본)
-        scores.append(keyword_score)
-        weights.append(0.3)
-        
-        # LLM 점수
+        scores, weights = [], []
+        scores.append(keyword_score); weights.append(0.3)
         if llm_score is not None:
-            scores.append(llm_score)
-            weights.append(0.5)
-        
-        # 임베딩 점수 (0-1을 0-10으로 변환)
+            scores.append(llm_score); weights.append(0.5)
         if embedding_score is not None:
-            scores.append(embedding_score * 10)
-            weights.append(0.2)
-        
-        # 가중 평균 계산
+            scores.append(embedding_score * 10); weights.append(0.2)
         if not scores:
             return 0.0
-        
-        # 가중치 정규화
-        total_weight = sum(weights)
-        normalized_weights = [w / total_weight for w in weights]
-        
-        final_score = sum(score * weight for score, weight in zip(scores, normalized_weights))
-        return round(final_score, 2)
+        tw = sum(weights)
+        weights = [w / tw for w in weights]
+        return round(sum(s * w for s, w in zip(scores, weights)), 2)
     
     def test_single_query(self, query: str) -> PerformanceMetrics:
         """단일 쿼리 성능 테스트"""
         print(f"테스트 중: {query}")
-        
         try:
-            # 전체 시간 측정 시작
             total_start_time = time.time()
-            
-            # 문서 검색 시간 측정
+            # 검색
             retrieval_start_time = time.time()
-            contexts = self.retrieve_documents(query, top_k=5)
+            contexts = self.retrieve_documents(query, top_k=self.eval_k)
             retrieval_time = time.time() - retrieval_start_time
-            
-            # 답변 생성
+            # 답변
             answer = self.generate_answer(query, contexts)
             total_time = time.time() - total_start_time
+
+            # ── 검색 정확도 (source 기준)
+            hit_at_k = mrr = ndcg_k = None
+            gold_sources = self.gold.get(query, {}).get("source")
+            if gold_sources:
+                topk_sources = _extract_sources_from_contexts(contexts)
+                metrics = compute_retrieval_metrics_by_source(topk_sources, gold_sources, k=self.eval_k)
+                hit_at_k = metrics["hit@k"]; mrr = metrics["mrr"]; ndcg_k = metrics["ndcg@k"]
+                print(f"  [검색지표] Hit@{self.eval_k}={hit_at_k:.2f} | MRR={mrr:.3f} | nDCG@{self.eval_k}={ndcg_k:.3f}")
+            else:
+                if self.gold:
+                    print("  (해당 쿼리의 골드셋 없음 → 검색지표 생략)")
             
-            # 다중 정확도 평가
+            # ── 답변 정확도
             print(f"  정확도 평가 중...")
-            
-            # 1. 키워드 기반 정확도
             keyword_accuracy = self.evaluate_keyword_accuracy(query, answer)
             print(f"    키워드 정확도: {keyword_accuracy:.2f}/10")
-            
-            # 2. LLM 기반 정확도
             llm_accuracy = self.evaluate_llm_accuracy(query, answer)
             if llm_accuracy is not None:
                 print(f"    LLM 정확도: {llm_accuracy:.2f}/10")
-            
-            # 3. 임베딩 유사도
             embedding_similarity = self.evaluate_embedding_similarity(query, answer)
             if embedding_similarity is not None:
                 print(f"    임베딩 유사도: {embedding_similarity:.3f}")
-            
-            # 4. 종합 정확도
             final_accuracy = self.calculate_final_accuracy(
                 keyword_accuracy, llm_accuracy, embedding_similarity
             )
@@ -293,14 +353,14 @@ class RAGPerformanceTester:
                 accuracy_score=keyword_accuracy,
                 llm_accuracy_score=llm_accuracy,
                 embedding_similarity=embedding_similarity,
-                final_accuracy_score=final_accuracy
+                final_accuracy_score=final_accuracy,
+                hit_at_k=hit_at_k,
+                mrr=mrr,
+                ndcg_at_k=ndcg_k
             )
-            
             print(f"  검색: {retrieval_time:.2f}s, 총: {total_time:.2f}s")
             print(f"  답변 길이: {metrics.answer_length}자")
-            
             return metrics
-            
         except Exception as e:
             error_msg = str(e).encode('ascii', errors='ignore').decode('ascii')
             print(f"  오류 발생: {error_msg}")
@@ -313,7 +373,10 @@ class RAGPerformanceTester:
                 accuracy_score=0,
                 llm_accuracy_score=None,
                 embedding_similarity=None,
-                final_accuracy_score=0
+                final_accuracy_score=0,
+                hit_at_k=0.0,
+                mrr=0.0,
+                ndcg_at_k=0.0
             )
     
     def run_performance_test(self) -> List[PerformanceMetrics]:
@@ -345,12 +408,17 @@ class RAGPerformanceTester:
         if not results:
             return
         
-        retrieval_times = [r.retrieval_time for r in results if r.retrieval_time > 0]
-        total_times = [r.total_time for r in results if r.total_time > 0]
-        keyword_scores = [r.accuracy_score for r in results if r.accuracy_score is not None and r.accuracy_score > 0]
+        retrieval_times = [r.retrieval_time for r in results if r.retrieval_time is not None]
+        total_times = [r.total_time for r in results if r.total_time is not None]
+        keyword_scores = [r.accuracy_score for r in results if r.accuracy_score is not None]
         llm_scores = [r.llm_accuracy_score for r in results if r.llm_accuracy_score is not None]
         embedding_scores = [r.embedding_similarity for r in results if r.embedding_similarity is not None]
-        final_scores = [r.final_accuracy_score for r in results if r.final_accuracy_score is not None and r.final_accuracy_score > 0]
+        final_scores = [r.final_accuracy_score for r in results if r.final_accuracy_score is not None]
+
+        # 검색지표 집계
+        hit_scores = [r.hit_at_k for r in results if r.hit_at_k is not None]
+        mrr_scores = [r.mrr for r in results if r.mrr is not None]
+        ndcg_scores = [r.ndcg_at_k for r in results if r.ndcg_at_k is not None]
         
         print("\n" + "=" * 60)
         print("테스트 결과 요약")
@@ -364,24 +432,25 @@ class RAGPerformanceTester:
             avg_total = sum(total_times) / len(total_times)
             print(f"평균 총 응답 시간: {avg_total:.2f}초")
         
-        print("\n정확도 분석:")
+        print("\n정확도 분석(답변):")
         if keyword_scores:
-            avg_keyword = sum(keyword_scores) / len(keyword_scores)
-            print(f"  키워드 기반 정확도: {avg_keyword:.2f}/10")
-        
+            print(f"  키워드 기반 정확도: {sum(keyword_scores)/len(keyword_scores):.2f}/10")
         if llm_scores:
-            avg_llm = sum(llm_scores) / len(llm_scores)
-            print(f"  LLM 기반 정확도: {avg_llm:.2f}/10")
-        
+            print(f"  LLM 기반 정확도: {sum(llm_scores)/len(llm_scores):.2f}/10")
         if embedding_scores:
-            avg_embedding = sum(embedding_scores) / len(embedding_scores)
-            print(f"  임베딩 유사도: {avg_embedding:.3f}")
-        
+            print(f"  임베딩 유사도: {sum(embedding_scores)/len(embedding_scores):.3f}")
         if final_scores:
-            avg_final = sum(final_scores) / len(final_scores)
-            print(f"  종합 정확도: {avg_final:.2f}/10")
+            print(f"  종합 정확도: {sum(final_scores)/len(final_scores):.2f}/10")
         else:
             print("  정확도 데이터: 없음")
+
+        print("\n정확도 분석(검색, source 기준):")
+        if hit_scores:
+            print(f"  평균 Hit@{self.eval_k}: {sum(hit_scores)/len(hit_scores):.2f}")
+        if mrr_scores:
+            print(f"  평균 MRR: {sum(mrr_scores)/len(mrr_scores):.3f}")
+        if ndcg_scores:
+            print(f"  평균 nDCG@{self.eval_k}: {sum(ndcg_scores)/len(ndcg_scores):.3f}")
     
     def save_results(self, filename: Optional[str] = None) -> str:
         """결과를 JSON 파일로 저장"""
@@ -389,28 +458,22 @@ class RAGPerformanceTester:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"performance_results_{timestamp}.json"
         
-        # test 폴더에 저장
         save_path = Path(__file__).parent / filename
-        
         results_data = [asdict(result) for result in self.results]
-        
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(results_data, f, ensure_ascii=False, indent=2)
-        
         print(f"결과 저장 완료: {save_path}")
         return str(save_path)
     
     def create_performance_chart(self, results: List[PerformanceMetrics], save_path: Optional[str] = None):
-        """성능 차트 생성"""
+        """시간/답변 정확도 시각화"""
         if not HAS_MATPLOTLIB:
             print("matplotlib가 없어 시각화를 생성할 수 없습니다.")
             return
-        
         if not results:
             print("시각화할 데이터가 없습니다.")
             return
         
-        # 데이터 준비
         queries = [r.query[:30] + "..." if len(r.query) > 30 else r.query for r in results]
         retrieval_times = [r.retrieval_time for r in results]
         total_times = [r.total_time for r in results]
@@ -419,128 +482,71 @@ class RAGPerformanceTester:
         embedding_scores = [r.embedding_similarity if r.embedding_similarity else 0 for r in results]
         final_scores = [r.final_accuracy_score if r.final_accuracy_score else 0 for r in results]
         
-        # 차트 생성 (2x4 레이아웃으로 확장)
         fig, ((ax1, ax2, ax3, ax4), (ax5, ax6, ax7, ax8)) = plt.subplots(2, 4, figsize=(20, 10))
         fig.suptitle('RAG 성능 테스트 결과 (다중 정확도 평가)', fontsize=16, fontweight='bold')
         
-        # 1. 검색 시간 막대 그래프
         ax1.bar(range(len(queries)), retrieval_times, color='skyblue', alpha=0.7)
         ax1.set_title('검색 시간 (초)', fontweight='bold')
-        ax1.set_xlabel('쿼리')
-        ax1.set_ylabel('시간 (초)')
-        ax1.set_xticks(range(len(queries)))
-        ax1.set_xticklabels(queries, rotation=45, ha='right')
+        ax1.set_xlabel('쿼리'); ax1.set_ylabel('시간 (초)')
+        ax1.set_xticks(range(len(queries))); ax1.set_xticklabels(queries, rotation=45, ha='right')
         
-        # 2. 총 응답 시간 막대 그래프
         ax2.bar(range(len(queries)), total_times, color='lightcoral', alpha=0.7)
         ax2.set_title('총 응답 시간 (초)', fontweight='bold')
-        ax2.set_xlabel('쿼리')
-        ax2.set_ylabel('시간 (초)')
-        ax2.set_xticks(range(len(queries)))
-        ax2.set_xticklabels(queries, rotation=45, ha='right')
+        ax2.set_xlabel('쿼리'); ax2.set_ylabel('시간 (초)')
+        ax2.set_xticks(range(len(queries))); ax2.set_xticklabels(queries, rotation=45, ha='right')
         
-        # 3. 키워드 기반 정확도
         ax3.bar(range(len(queries)), keyword_scores, color='lightgreen', alpha=0.7)
         ax3.set_title('키워드 기반 정확도 (0-10)', fontweight='bold')
-        ax3.set_xlabel('쿼리')
-        ax3.set_ylabel('점수')
-        ax3.set_xticks(range(len(queries)))
-        ax3.set_xticklabels(queries, rotation=45, ha='right')
-        ax3.set_ylim(0, 10)
+        ax3.set_xlabel('쿼리'); ax3.set_ylabel('점수')
+        ax3.set_xticks(range(len(queries))); ax3.set_xticklabels(queries, rotation=45, ha='right'); ax3.set_ylim(0, 10)
         
-        # 4. LLM 기반 정확도
         ax4.bar(range(len(queries)), llm_scores, color='gold', alpha=0.7)
         ax4.set_title('LLM 기반 정확도 (0-10)', fontweight='bold')
-        ax4.set_xlabel('쿼리')
-        ax4.set_ylabel('점수')
-        ax4.set_xticks(range(len(queries)))
-        ax4.set_xticklabels(queries, rotation=45, ha='right')
-        ax4.set_ylim(0, 10)
+        ax4.set_xlabel('쿼리'); ax4.set_ylabel('점수')
+        ax4.set_xticks(range(len(queries))); ax4.set_xticklabels(queries, rotation=45, ha='right'); ax4.set_ylim(0, 10)
         
-        # 5. 임베딩 유사도
         ax5.bar(range(len(queries)), embedding_scores, color='orange', alpha=0.7)
         ax5.set_title('임베딩 유사도 (0-1)', fontweight='bold')
-        ax5.set_xlabel('쿼리')
-        ax5.set_ylabel('유사도')
-        ax5.set_xticks(range(len(queries)))
-        ax5.set_xticklabels(queries, rotation=45, ha='right')
-        ax5.set_ylim(0, 1)
+        ax5.set_xlabel('쿼리'); ax5.set_ylabel('유사도')
+        ax5.set_xticks(range(len(queries))); ax5.set_xticklabels(queries, rotation=45, ha='right'); ax5.set_ylim(0, 1)
         
-        # 6. 종합 정확도
         ax6.bar(range(len(queries)), final_scores, color='mediumpurple', alpha=0.7)
         ax6.set_title('종합 정확도 (0-10)', fontweight='bold')
-        ax6.set_xlabel('쿼리')
-        ax6.set_ylabel('점수')
-        ax6.set_xticks(range(len(queries)))
-        ax6.set_xticklabels(queries, rotation=45, ha='right')
-        ax6.set_ylim(0, 10)
+        ax6.set_xlabel('쿼리'); ax6.set_ylabel('점수')
+        ax6.set_xticks(range(len(queries))); ax6.set_xticklabels(queries, rotation=45, ha='right'); ax6.set_ylim(0, 10)
         
-        # 7. 시간 성능 요약
         valid_retrieval = [t for t in retrieval_times if t > 0]
         valid_total = [t for t in total_times if t > 0]
-        
-        time_categories = []
-        time_values = []
-        time_colors = []
-        
+        time_categories, time_values, time_colors = [], [], []
         if valid_retrieval:
-            time_categories.append('평균 검색시간\n(초)')
-            time_values.append(sum(valid_retrieval) / len(valid_retrieval))
-            time_colors.append('skyblue')
-        
+            time_categories.append('평균 검색시간\n(초)'); time_values.append(sum(valid_retrieval) / len(valid_retrieval)); time_colors.append('skyblue')
         if valid_total:
-            time_categories.append('평균 총시간\n(초)')
-            time_values.append(sum(valid_total) / len(valid_total))
-            time_colors.append('lightcoral')
-        
+            time_categories.append('평균 총시간\n(초)'); time_values.append(sum(valid_total) / len(valid_total)); time_colors.append('lightcoral')
         if time_categories:
             ax7.bar(time_categories, time_values, color=time_colors, alpha=0.7)
-            ax7.set_title('시간 성능 요약', fontweight='bold')
-            ax7.set_ylabel('시간 (초)')
-            
-            # 값 표시
+            ax7.set_title('시간 성능 요약', fontweight='bold'); ax7.set_ylabel('시간 (초)')
             for i, v in enumerate(time_values):
                 ax7.text(i, v + max(time_values) * 0.01, f'{v:.2f}', ha='center', va='bottom', fontweight='bold')
         else:
             ax7.text(0.5, 0.5, '데이터 없음', ha='center', va='center', transform=ax7.transAxes, fontsize=14)
             ax7.set_title('시간 성능 요약', fontweight='bold')
         
-        # 8. 정확도 성능 요약
         valid_keyword = [s for s in keyword_scores if s > 0]
         valid_llm = [s for s in llm_scores if s > 0]
         valid_embedding = [s for s in embedding_scores if s > 0]
         valid_final = [s for s in final_scores if s > 0]
-        
-        accuracy_categories = []
-        accuracy_values = []
-        accuracy_colors = []
-        
+        accuracy_categories, accuracy_values, accuracy_colors = [], [], []
         if valid_keyword:
-            accuracy_categories.append('키워드\n(0-10)')
-            accuracy_values.append(sum(valid_keyword) / len(valid_keyword))
-            accuracy_colors.append('lightgreen')
-        
+            accuracy_categories.append('키워드\n(0-10)'); accuracy_values.append(sum(valid_keyword) / len(valid_keyword)); accuracy_colors.append('lightgreen')
         if valid_llm:
-            accuracy_categories.append('LLM\n(0-10)')
-            accuracy_values.append(sum(valid_llm) / len(valid_llm))
-            accuracy_colors.append('gold')
-        
+            accuracy_categories.append('LLM\n(0-10)'); accuracy_values.append(sum(valid_llm) / len(valid_llm)); accuracy_colors.append('gold')
         if valid_embedding:
-            accuracy_categories.append('임베딩\n(0-1)')
-            accuracy_values.append(sum(valid_embedding) / len(valid_embedding))
-            accuracy_colors.append('orange')
-        
+            accuracy_categories.append('임베딩\n(0-1)'); accuracy_values.append(sum(valid_embedding) / len(valid_embedding)); accuracy_colors.append('orange')
         if valid_final:
-            accuracy_categories.append('종합\n(0-10)')
-            accuracy_values.append(sum(valid_final) / len(valid_final))
-            accuracy_colors.append('mediumpurple')
-        
+            accuracy_categories.append('종합\n(0-10)'); accuracy_values.append(sum(valid_final) / len(valid_final)); accuracy_colors.append('mediumpurple')
         if accuracy_categories:
             ax8.bar(accuracy_categories, accuracy_values, color=accuracy_colors, alpha=0.7)
-            ax8.set_title('정확도 성능 요약', fontweight='bold')
-            ax8.set_ylabel('점수')
-            
-            # 값 표시
+            ax8.set_title('정확도 성능 요약', fontweight='bold'); ax8.set_ylabel('점수')
             for i, v in enumerate(accuracy_values):
                 ax8.text(i, v + max(accuracy_values) * 0.01, f'{v:.2f}', ha='center', va='bottom', fontweight='bold')
         else:
@@ -548,36 +554,91 @@ class RAGPerformanceTester:
             ax8.set_title('정확도 성능 요약', fontweight='bold')
         
         plt.tight_layout()
-        
-        # 저장
         if save_path is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             save_path = Path(__file__).parent / f"performance_chart_{timestamp}.png"
-        
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"성능 차트 저장: {save_path}")
         plt.close()
+
+    def create_search_metrics_chart(self, results: List['PerformanceMetrics'], save_path: Optional[str] = None):
+        """검색 정확도 전용 시각화 (Hit@k, MRR, nDCG@k) — source 기준"""
+        if not HAS_MATPLOTLIB:
+            print("matplotlib가 없어 검색 지표 시각화를 생성할 수 없습니다.")
+            return
+        if not results:
+            print("시각화할 데이터가 없습니다.")
+            return
+
+        queries = []
+        hits, mrrs, ndcgs = [], [], []
+        for r in results:
+            if r.hit_at_k is None or r.mrr is None or r.ndcg_at_k is None:
+                continue
+            queries.append(r.query[:30] + "..." if len(r.query) > 30 else r.query)
+            hits.append(r.hit_at_k); mrrs.append(r.mrr); ndcgs.append(r.ndcg_at_k)
+
+        if not queries:
+            print("검색 지표가 존재하지 않아 시각화를 생략합니다. (골드셋 제공 필요)")
+            return
+
+        import numpy as np
+        x = np.arange(len(queries))
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 6))
+        fig.suptitle(f'RAG 검색 정확도 (k={self.eval_k}, source 매칭)', fontsize=16, fontweight='bold')
+
+        width = 0.25
+        ax1.bar(x - width, hits,  width, alpha=0.85, label=f'Hit@{self.eval_k}')
+        ax1.bar(x,        mrrs,  width, alpha=0.85, label='MRR')
+        ax1.bar(x + width, ndcgs, width, alpha=0.85, label=f'nDCG@{self.eval_k}')
+        ax1.set_title('쿼리별 검색 지표')
+        ax1.set_xticks(x); ax1.set_xticklabels(queries, rotation=45, ha='right')
+        ax1.set_ylim(0, 1.05); ax1.set_ylabel('Score'); ax1.legend()
+
+        avg_hit = sum(hits)/len(hits) if hits else 0.0
+        avg_mrr = sum(mrrs)/len(mrrs) if mrrs else 0.0
+        avg_ndcg = sum(ndcgs)/len(ndcgs) if ndcgs else 0.0
+
+        cats = [f'Hit@{self.eval_k}', 'MRR', f'nDCG@{self.eval_k}']
+        vals = [avg_hit, avg_mrr, avg_ndcg]
+        ax2.bar(cats, vals, alpha=0.85)
+        ax2.set_title('평균 검색 지표 요약')
+        ax2.set_ylim(0, 1.05); ax2.set_ylabel('Score')
+        for i, v in enumerate(vals):
+            ax2.text(i, v + 0.02, f'{v:.3f}', ha='center', va='bottom', fontweight='bold')
+
+        plt.tight_layout()
+        if save_path is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = Path(__file__).parent / f"search_metrics_chart_{timestamp}.png"
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"검색 지표 차트 저장: {save_path}")
+        plt.close()
+
 
 def main():
     """메인 실행 함수"""
     print("=" * 60)
     print("내부 문서 RAG 성능 테스트")
     print("=" * 60)
+
+    # 사용법:
+    #   python performance_test.py                # 골드셋 없이 실행
+    #   python performance_test.py gold.json 7    # 골드셋 + k=7
+    gold_path = sys.argv[1] if len(sys.argv) >= 2 else None
+    eval_k = int(sys.argv[2]) if len(sys.argv) >= 3 else int(os.getenv("EVAL_K", "5"))
     
-    tester = RAGPerformanceTester()
+    tester = RAGPerformanceTester(gold_path=gold_path, eval_k=eval_k)
     results = tester.run_performance_test()
     
     if results:
         print(f"\n테스트 완료! 총 {len(results)}개 쿼리 처리됨")
-        
-        # 결과 저장
         tester.save_results()
-        
-        # 시각화 생성
         if HAS_MATPLOTLIB:
             print("\n시각화 생성 중...")
-            tester.create_performance_chart(results)
-        
+            tester.create_performance_chart(results)     # 시간/답변 정확도
+            tester.create_search_metrics_chart(results)  # 검색 정확도
     else:
         print("테스트 실행 실패!")
 
