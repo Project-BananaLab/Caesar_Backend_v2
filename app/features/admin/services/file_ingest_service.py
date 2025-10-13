@@ -180,13 +180,20 @@ def handle_upload_and_ingest(
 
             return {"ok": False, "docId": doc.id, "error": "ingest_failed"}
 
-        # ── 5) docs UPDATE (성공)
-        doc.ingest_status = "succeeded"
-        doc.chunks_count = chunks_count
-        doc.ingested_at = datetime.utcnow()
-        doc.updated_at = datetime.utcnow()
-        db.add(doc)
-        db.commit()
+        # ── 5) docs UPDATE (성공) - 안전한 업데이트
+        try:
+            # 최신 상태로 새로고침
+            db.refresh(doc)
+            doc.ingest_status = "succeeded"
+            doc.chunks_count = chunks_count
+            doc.ingested_at = datetime.utcnow()
+            doc.updated_at = datetime.utcnow()
+            db.add(doc)
+            db.commit()
+        except Exception as update_error:
+            print(f"⚠️ docs 업데이트 실패: {update_error}")
+            # 업데이트 실패해도 ChromaDB 저장은 성공했으므로 계속 진행
+            db.rollback()
 
         return {
             "ok": True,
@@ -198,12 +205,17 @@ def handle_upload_and_ingest(
         }
 
     except Exception as e:
-        # 실패 시 상태/에러 메시지 남김
-        doc.ingest_status = "failed"
-        doc.error_text = f"{type(e).__name__}: {e}"
-        doc.updated_at = datetime.utcnow()
-        db.add(doc)
-        db.commit()
+        # 실패 시 상태/에러 메시지 남김 - 안전한 업데이트
+        try:
+            db.refresh(doc)
+            doc.ingest_status = "failed"
+            doc.error_text = f"{type(e).__name__}: {e}"
+            doc.updated_at = datetime.utcnow()
+            db.add(doc)
+            db.commit()
+        except Exception as update_error:
+            print(f"⚠️ 실패 상태 업데이트 실패: {update_error}")
+            db.rollback()
 
         # (선택) 롤백: S3 지우기
         try:
